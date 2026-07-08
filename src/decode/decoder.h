@@ -6,6 +6,7 @@
 #include "decode/message_log.h"
 #include "dsp/ddc.h"
 #include "dsp/wfm_demod.h"
+#include "dsp/am_nfm_demod.h"
 #include "multimon_ng/multimon_lib.h"
 
 #include <atomic>
@@ -26,6 +27,11 @@ static constexpr int kEgcBaud = 1;
 // output is played through the shared AudioSink when this channel is selected
 // as the active audio source.
 static constexpr int kWfmBaud = 3;
+
+// Special "baud" codes for AM and narrowband-FM audio channels. Like WFM, their
+// demodulated audio is played through the shared AudioSink when selected.
+static constexpr int kAmBaud  = 4;
+static constexpr int kNfmBaud = 5;
 
 // Special "baud" code that runs POCSAG and FLEX simultaneously and reports
 // whichever protocol is actually present (auto-detection).
@@ -66,6 +72,10 @@ public:
     uint64_t msgCount() const { return msgCount_.load(); }
     bool   isEgc() const { return baud_ == kEgcBaud; }
     bool   isWfm() const { return baud_ == kWfmBaud; }
+    bool   isAm()  const { return baud_ == kAmBaud; }
+    bool   isNfm() const { return baud_ == kNfmBaud; }
+    // Any audio-producing channel routed through the shared AudioSink.
+    bool   isAudio() const { return baud_ == kWfmBaud || baud_ == kAmBaud || baud_ == kNfmBaud; }
     bool   isAuto() const { return baud_ == kAutoBaud; }
     int    egcBer() const;    // -1 if not EGC
     int    egcFrames() const; // 0 if not EGC
@@ -76,7 +86,7 @@ public:
     void setAudioSink(AudioSink* sink) { audioSink_ = sink; }
     void setAudioActive(bool on) { audioActive_.store(on); }
     bool audioActive() const { return audioActive_.load(); }
-    double wfmAudioRate() const; // 0 if not a WFM decoder
+    double audioRate() const; // sink source rate for this channel (0 if not audio)
 
     // multimon-ng FLEX message callback target.
     void onFlexMessage(int64_t capcode, const std::string& type, const std::string& text);
@@ -104,6 +114,8 @@ private:
 
     // WFM audio path (baud == kWfmBaud only).
     std::unique_ptr<WfmDemod> wfm_;
+    // AM / NFM audio path (baud == kAmBaud / kNfmBaud).
+    std::unique_ptr<AmNfmDemod> amfm_;
     std::vector<float> audioBuf_;
     AudioSink* audioSink_ = nullptr;
     std::atomic<bool> audioActive_{false};

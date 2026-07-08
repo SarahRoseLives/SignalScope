@@ -37,7 +37,9 @@ static int baudFromComboIndex(int idx)
 {
     switch (idx)
     {
-        case 1:  return kAutoBaud; // Pager: POCSAG + FLEX auto-detect
+        case 1:  return kAmBaud;   // AM audio
+        case 2:  return kNfmBaud;  // narrowband FM audio
+        case 3:  return kAutoBaud; // Pager: POCSAG + FLEX auto-detect
         case 0:
         default: return kWfmBaud;  // WFM broadcast audio
     }
@@ -715,7 +717,7 @@ void drawControls(App& app)
     }
 
     ImGui::Separator();
-    const char* bauds[] = {"WFM (broadcast audio)", "Pager (POCSAG/FLEX auto)"};
+    const char* bauds[] = {"WFM (broadcast audio)", "AM (audio)", "NFM (audio)", "Pager (POCSAG/FLEX auto)"};
     const int kNumBauds = (int)(sizeof(bauds) / sizeof(bauds[0]));
     if (app.newBaud < 0 || app.newBaud >= kNumBauds)
         app.newBaud = 0;
@@ -1173,6 +1175,10 @@ void drawDecoders(App& app)
             }
             else if (d.baud == kWfmBaud)
                 ImGui::TextUnformatted("WFM");
+            else if (d.baud == kAmBaud)
+                ImGui::TextUnformatted("AM");
+            else if (d.baud == kNfmBaud)
+                ImGui::TextUnformatted("NFM");
             else if (d.baud == kAutoBaud)
                 ImGui::TextUnformatted("Pager");
             else
@@ -1180,7 +1186,7 @@ void drawDecoders(App& app)
             ImGui::TableNextColumn();
             ImGui::Text("%llu", (unsigned long long)d.msgs);
             ImGui::TableNextColumn();
-            if (d.isWfm && !d.isB)
+            if (d.isAudio && !d.isB)
             {
                 char lbtn[24];
                 std::snprintf(lbtn, sizeof(lbtn), "%s##L%d", d.audioOn ? "Playing" : "Play", uid);

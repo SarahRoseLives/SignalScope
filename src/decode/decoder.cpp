@@ -19,6 +19,10 @@ static double ddcBw(int baud)
     // Per-channel DDC passband (double-sided).
     if (baud == kWfmBaud)
         return 200000.0;    // broadcast FM channel
+    if (baud == kAmBaud)
+        return 10000.0;     // AM (±5 kHz audio)
+    if (baud == kNfmBaud)
+        return 12500.0;     // narrowband FM channel
     if (baud == kEgcBaud)
         return 6000.0;      // Inmarsat-C / EGC
     if (baud == 10500)
@@ -116,6 +120,13 @@ Decoder::Decoder(double subRate, double subCenterHz, double chanFreqHz, int baud
         wfm_->configure(ddc_.outputRate(), 48000.0);
         audioBuf_.reserve(8192);
     }
+    else if (baud == kAmBaud || baud == kNfmBaud)
+    {
+        amfm_ = std::make_unique<AmNfmDemod>();
+        amfm_->configure(baud == kAmBaud ? AmNfmDemod::AM : AmNfmDemod::NFM,
+                         ddc_.outputRate(), 5000.0);
+        audioBuf_.reserve(8192);
+    }
     else
     {
         // Pager path: POCSAG + FLEX. In auto mode both run together and whichever
@@ -193,6 +204,24 @@ void Decoder::process(const double* iq, int nComplex)
         {
             audioBuf_.clear();
             wfm_->process(ddcOut_.data(), n, audioBuf_);
+            if (!audioBuf_.empty())
+                audioSink_->push(audioBuf_.data(), (int)audioBuf_.size());
+        }
+        return;
+    }
+
+    // ---- AM / NFM audio ----
+    if (amfm_)
+    {
+        ddcOut_.clear();
+        ddc_.process(iq, nComplex, ddcOut_);
+        if (ddcOut_.empty())
+            return;
+        int n = (int)(ddcOut_.size() / 2);
+        if (audioActive_.load() && audioSink_)
+        {
+            audioBuf_.clear();
+            amfm_->process(ddcOut_.data(), n, audioBuf_);
             if (!audioBuf_.empty())
                 audioSink_->push(audioBuf_.data(), (int)audioBuf_.size());
         }
@@ -332,7 +361,12 @@ int Decoder::egcBer() const { return egc_ ? egc_->lastBer() : -1; }
 int Decoder::egcFrames() const { return egc_ ? egc_->framesSynced() : 0; }
 int Decoder::egcChannelType() const { return egc_ ? egc_->channelType() : 0; }
 
-double Decoder::wfmAudioRate() const { return wfm_ ? wfm_->audioRate() : 0.0; }
+double Decoder::audioRate() const
+{
+    if (wfm_)  return wfm_->audioRate();
+    if (amfm_) return amfm_->audioRate();
+    return 0.0;
+}
 
 void Decoder::onFlexMessage(int64_t capcode, const std::string& type, const std::string& text)
 {

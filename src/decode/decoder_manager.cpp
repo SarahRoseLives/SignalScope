@@ -29,11 +29,12 @@ void DecoderManager::configure(double Fs, double centerHz)
     centerHz_ = centerHz;
 }
 
-// Attach the audio sink to a freshly created WFM decoder. Newly added WFM
-// channels start muted; the UI selects which one plays via setAudioChannel().
+// Attach the audio sink to a freshly created audio (WFM/AM/NFM) decoder. Newly
+// added audio channels start muted; the UI selects which one plays via
+// setAudioChannel().
 static void wireAudio(const std::shared_ptr<Decoder>& d, AudioSink* sink)
 {
-    if (sink && d->isWfm())
+    if (sink && d->isAudio())
         d->setAudioSink(sink);
 }
 void DecoderManager::start()
@@ -93,11 +94,12 @@ void DecoderManager::feed(const float* iq, int nComplex)
 int DecoderManager::addDecoder(double freqHz, int baud, uint32_t aesId)
 {
     int id = addDecoderImpl(freqHz, baud, aesId);
-    // Auto-play: dropping a WFM channel immediately routes it to the speaker
-    // (no separate "Listen" click needed). Done after the add so all locks are
-    // released. setAudioChannel would toggle off if id already active, so only
-    // call it when this id isn't already the audio channel.
-    if (id > 0 && baud == kWfmBaud && audioChannel_.load() != id)
+    // Auto-play: dropping an audio channel (WFM/AM/NFM) immediately routes it to
+    // the speaker (no separate "Listen" click needed). Done after the add so all
+    // locks are released. setAudioChannel would toggle off if id already active,
+    // so only call it when this id isn't already the audio channel.
+    bool isAudio = (baud == kWfmBaud || baud == kAmBaud || baud == kNfmBaud);
+    if (id > 0 && isAudio && audioChannel_.load() != id)
         setAudioChannel(id);
     return id;
 }
@@ -267,8 +269,8 @@ void DecoderManager::removeAll()
     }
 }
 
-// Route audio from exactly one WFM channel (or none if 0/not found). Toggling
-// the same channel again turns audio off.
+// Route audio from exactly one audio channel (WFM/AM/NFM), or none if 0/not
+// found. Toggling the same channel again turns audio off.
 void DecoderManager::setAudioChannel(int channelId)
 {
     int prev = audioChannel_.load();
@@ -280,12 +282,12 @@ void DecoderManager::setAudioChannel(int channelId)
         for (auto& sb : w->subbands)
             for (auto& d : sb->decoders)
             {
-                if (!d->isWfm())
+                if (!d->isAudio())
                     continue;
                 bool on = (d->channelId() == target);
                 d->setAudioActive(on);
                 if (on)
-                    activeRate = d->wfmAudioRate();
+                    activeRate = d->audioRate();
             }
     }
     audioChannel_.store(target);
@@ -328,7 +330,7 @@ std::vector<DecoderManager::Status> DecoderManager::status()
                 Status s{d->channelId(), d->freqMHz(), d->baud(),
                          d->locked(), d->msgCount(),
                          d->egcBer(), d->egcFrames(), d->egcChannelType()};
-                s.isWfm = d->isWfm();
+                s.isAudio = d->isAudio();
                 s.audioOn = d->audioActive();
                 out.push_back(s);
             }

@@ -33,7 +33,7 @@ public:
         int egcFrames;  // 0 unless EGC
         int egcCType;   // 0=unknown, 1=NCS, 2=LES TDM, 3=Joint, 4=Standby
         bool isB       = false; // from decodersB (dual RTL)
-        bool isWfm     = false; // wideband-FM audio channel
+        bool isAudio   = false; // audio channel (WFM/AM/NFM) routable to speaker
         bool audioOn   = false; // currently routed to the speaker
     };
 
