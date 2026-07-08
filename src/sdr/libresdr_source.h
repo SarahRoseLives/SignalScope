@@ -37,7 +37,12 @@ public:
 
     // LibreSDR / B210 specific configuration (applied on next start()).
     void setFpgaImage(const std::string& path) { fpgaPath_ = path; }
-    void setAntenna(const std::string& ant) { antenna_ = ant; }
+    // Select the RF input port. The LibreSDR housing exposes four: TRXA, RXA,
+    // TRXB, RXB. On the B210 these are the two RX frontends (subdev "A:A"/"A:B")
+    // each with two antenna ports ("TX/RX"/"RX2"):
+    //   0 = TRXA (A:A, TX/RX)   1 = RXA (A:A, RX2)
+    //   2 = TRXB (A:B, TX/RX)   3 = RXB (A:B, RX2)
+    void setPort(int idx) { port_ = (idx < 0 || idx > 3) ? 1 : idx; }
     void setBandwidth(double hz) { bandwidth_ = hz; }
 
     double centerFreq() const override { return centerFreq_; }
@@ -71,7 +76,7 @@ private:
     double bandwidth_ = 0.0;     // 0 => track sample rate
     double gainDb_ = 40.0;       // <0 => AGC
     double ppm_ = 0.0;
-    std::string antenna_ = "RX2";
+    int port_ = 1;               // 0=TRXA 1=RXA 2=TRXB 3=RXB (housing labels)
     std::string fpgaPath_ = "libresdr_b210.bin";
 
     std::atomic<bool> dcBlock_{true};

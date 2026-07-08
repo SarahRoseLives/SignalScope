@@ -3,6 +3,7 @@
 #include "util/log.h"
 
 #include <uhd/usrp/multi_usrp.hpp>
+#include <uhd/usrp/subdev_spec.hpp>
 #include <uhd/stream.hpp>
 #include <uhd/types/tune_request.hpp>
 #include <uhd/types/device_addr.hpp>
@@ -183,6 +184,17 @@ bool LibreSdrSource::prepare(int deviceIndex, std::string& err)
         logWrite("LibreSDR: opening via UHD (fpga=%s)", fpga.c_str());
         impl_->usrp = uhd::usrp::multi_usrp::make(args);
 
+        // Map the housing port label to a B210 frontend (subdev) + antenna port.
+        //   0=TRXA -> A:A / TX/RX   1=RXA -> A:A / RX2
+        //   2=TRXB -> A:B / TX/RX   3=RXB -> A:B / RX2
+        const char* subdev = (port_ >= 2) ? "A:B" : "A:A";
+        const char* antPort = (port_ == 0 || port_ == 2) ? "TX/RX" : "RX2";
+        try
+        {
+            impl_->usrp->set_rx_subdev_spec(uhd::usrp::subdev_spec_t(subdev));
+        }
+        catch (const std::exception& e) { logWrite("LibreSDR set_rx_subdev_spec: %s", e.what()); }
+
         impl_->usrp->set_rx_rate(sampleRate_);
         sampleRate_ = impl_->usrp->get_rx_rate();
 
@@ -202,7 +214,7 @@ bool LibreSdrSource::prepare(int deviceIndex, std::string& err)
         double bw = bandwidth_ > 0.0 ? bandwidth_ : sampleRate_;
         impl_->usrp->set_rx_bandwidth(bw);
 
-        try { impl_->usrp->set_rx_antenna(antenna_); }
+        try { impl_->usrp->set_rx_antenna(antPort); }
         catch (const std::exception&) { /* antenna name not supported */ }
 
         uhd::stream_args_t sargs("fc32", "sc16");
@@ -368,16 +380,60 @@ void LibreSdrSource::setSampleRate(double hz)
 {
     sampleRate_ = hz;
     std::lock_guard<std::mutex> lk(ctrlMutex_);
-    if (impl_ && impl_->usrp)
+    if (!impl_ || !impl_->usrp)
+        return;
+
+    // Changing the RX rate rebuilds the B200's streaming DSP chain. Doing that
+    // while the rx thread is blocked in recv() corrupts the streamer and
+    // crashes, so pause streaming first: stop the stream, join the rx thread
+    // (no one is in recv() after this), then reconfigure and resume.
+    const bool wasStreaming = running_.load() && rxThread_.joinable();
+    if (wasStreaming)
     {
+        stopReq_.store(true);
         try
         {
-            impl_->usrp->set_rx_rate(hz);
-            sampleRate_ = impl_->usrp->get_rx_rate();
-            double bw = bandwidth_ > 0.0 ? bandwidth_ : sampleRate_;
-            impl_->usrp->set_rx_bandwidth(bw);
+            uhd::stream_cmd_t cmd(uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS);
+            impl_->stream->issue_stream_cmd(cmd);
         }
-        catch (const std::exception& e) { logWrite("LibreSDR set_rx_rate: %s", e.what()); }
+        catch (const std::exception&) {}
+        rxThread_.join();
+    }
+
+    try
+    {
+        impl_->usrp->set_rx_rate(hz);
+        sampleRate_ = impl_->usrp->get_rx_rate();
+        double bw = bandwidth_ > 0.0 ? bandwidth_ : sampleRate_;
+        impl_->usrp->set_rx_bandwidth(bw);
+
+        // The rx streamer is bound to the old rate/DSP config; rebuild it so the
+        // new rate takes effect cleanly.
+        uhd::stream_args_t sargs("fc32", "sc16");
+        impl_->stream = impl_->usrp->get_rx_stream(sargs);
+    }
+    catch (const std::exception& e)
+    {
+        logWrite("LibreSDR set_rx_rate: %s", e.what());
+    }
+
+    if (wasStreaming)
+    {
+        dcOffRe_ = dcOffIm_ = 0.0f;
+        dcRate_ = (float)(50.0 / sampleRate_);
+        stopReq_.store(false);
+        try
+        {
+            uhd::stream_cmd_t cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
+            cmd.stream_now = true;
+            impl_->stream->issue_stream_cmd(cmd);
+            rxThread_ = std::thread([this]() { rxLoop(); });
+        }
+        catch (const std::exception& e)
+        {
+            logWrite("LibreSDR stream restart failed: %s", e.what());
+            running_.store(false);
+        }
     }
 }
 

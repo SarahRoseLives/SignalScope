@@ -134,13 +134,12 @@ void startActive(App& app)
 #ifdef HAS_LIBRESDR
     else if (app.sourceMode == 6)
     {
-        static const char* kLibreAntennas[] = {"RX2", "TX/RX"};
         app.active = &app.libre;
         app.libre.setFpgaImage(app.libreFpgaPath);
         app.libre.setSampleRate(app.libreSampleRateMHz * 1e6);
         app.libre.setCenterFreq(app.centerFreqMHz * 1e6);
         app.libre.setGain((double)app.libreGainDb);
-        app.libre.setAntenna(kLibreAntennas[app.libreAntennaIdx & 1]);
+        app.libre.setPort(app.libreAntennaIdx);
         app.libre.setDcBlock(app.dcBlock);
         ok = app.libre.start(app.deviceIndex, cb, err);
     }

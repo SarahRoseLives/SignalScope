@@ -94,7 +94,7 @@ struct App
 #ifdef HAS_LIBRESDR
     double libreSampleRateMHz = 4.0;
     float  libreGainDb = 40.0f;   // B210 RX gain 0..76 dB
-    int    libreAntennaIdx = 0;   // 0=RX2, 1=TX/RX
+    int    libreAntennaIdx = 1;   // 0=TRXA 1=RXA 2=TRXB 3=RXB (housing port labels)
     char   libreFpgaPath[512] = "libresdr_b210.bin";
 #endif
 
@@ -222,4 +222,4 @@ constexpr const char* kFftLabels[] = {"1024", "2048", "4096", "8192", "16384", "
 constexpr int kNumFftSizes = (int)(sizeof(kFftSizes) / sizeof(kFftSizes[0]));
 
 // Dock layout version: bump when the built-in default layout changes.
-constexpr int kLayoutVersion = 14;
+constexpr int kLayoutVersion = 15;

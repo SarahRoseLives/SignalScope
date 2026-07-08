@@ -58,12 +58,11 @@ static void beginStartActive(App& app)
             app.startThread.join();
 
         // Apply config up front so the worker's open() uses the right settings.
-        static const char* kLibreAntennas[] = {"RX2", "TX/RX"};
         app.libre.setFpgaImage(app.libreFpgaPath);
         app.libre.setSampleRate(app.libreSampleRateMHz * 1e6);
         app.libre.setCenterFreq(app.centerFreqMHz * 1e6);
         app.libre.setGain((double)app.libreGainDb);
-        app.libre.setAntenna(kLibreAntennas[app.libreAntennaIdx & 1]);
+        app.libre.setPort(app.libreAntennaIdx);
         app.libre.setDcBlock(app.dcBlock);
 
         app.status = "Initializing LibreSDR...";
@@ -556,9 +555,9 @@ void drawControls(App& app)
             if (running)
                 app.libre.setSampleRate(app.libreSampleRateMHz * 1e6);
         }
-        const char* libreAnts[] = {"RX2", "TX/RX"};
+        const char* libreAnts[] = {"TRXA", "RXA", "TRXB", "RXB"};
         ImGui::BeginDisabled(running);
-        ImGui::Combo("Antenna", &app.libreAntennaIdx, libreAnts, 2);
+        ImGui::Combo("Antenna", &app.libreAntennaIdx, libreAnts, 4);
         ImGui::EndDisabled();
         if (ImGui::SliderFloat("Gain (dB)", &app.libreGainDb, 0.0f, 76.0f, "%.1f"))
         {
@@ -1212,88 +1211,6 @@ void drawDecoders(App& app)
     ImGui::End();
 }
 
-void drawSUs(App& app)
-{
-    ImGui::Begin((std::string(_L("Placeholder")) + "###Placeholder").c_str());
-
-    unsigned long long suTotal = app.decoders.suLog().count();
-    if (app.dualMode) suTotal += app.decodersB.suLog().count();
-    ImGui::Text("%llu total", suTotal);
-    ImGui::SameLine();
-    if (ImGui::SmallButton(_L("Clear")))
-    {
-        app.decoders.suLog().clear();
-        if (app.dualMode) app.decodersB.suLog().clear();
-    }
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputTextWithHint("##searchsu", "Search...", app.searchBuf, sizeof(app.searchBuf));
-
-    ImGui::Separator();
-
-    auto msgs = app.decoders.suLog().snapshot();
-    if (app.dualMode)
-    {
-        auto b = app.decodersB.suLog().snapshot();
-        msgs.insert(msgs.end(), b.begin(), b.end());
-    }
-    std::sort(msgs.begin(), msgs.end(),
-              [](const DecodedMessage& a, const DecodedMessage& b) { return a.timeSec > b.timeSec; });
-    std::string searchLower;
-    bool hasSearch = (app.searchBuf[0] != 0);
-    if (hasSearch)
-    {
-        searchLower = app.searchBuf;
-        for (auto& ch : searchLower) ch = (char)std::tolower((unsigned char)ch);
-    }
-    if (ImGui::BeginTable("##sus", 3,
-                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable))
-    {
-        ImGui::TableSetupColumn("Freq", ImGuiTableColumnFlags_WidthFixed, 70);
-        ImGui::TableSetupColumn("Text", ImGuiTableColumnFlags_WidthFixed, 220);
-        ImGui::TableSetupColumn("Bytes");
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableHeadersRow();
-
-        for (auto it = msgs.begin(); it != msgs.end(); ++it)
-        {
-            if (hasSearch)
-            {
-                std::string hay = it->text + "|" + it->hex;
-                for (auto& ch : hay) ch = (char)std::tolower((unsigned char)ch);
-                if (hay.find(searchLower) == std::string::npos)
-                    continue;
-            }
-            ImGui::TableNextRow();
-
-            // Colorize by SU type
-            ImVec4 col = ImVec4(0.7f, 0.7f, 0.7f, 1.0f); // default gray
-            if (it->suType == 0x30 && it->aesId != 0)      // Call progress — per-aircraft color
-            {
-                float hue = (it->aesId * 0.618033988749895f); // golden ratio conjugate
-                hue = hue - (int)hue;
-                ImGui::ColorConvertHSVtoRGB(hue, 0.8f, 0.9f, col.x, col.y, col.z);
-            }
-            else if (it->suType == 0x21)                    // Call announcement
-                col = ImVec4(1.0f, 0.85f, 0.2f, 1.0f);     // gold
-            else if (it->suType >= 0x31 && it->suType <= 0x34) // C-channel assignment
-                col = ImVec4(0.3f, 0.7f, 1.0f, 1.0f);     // blue
-
-            ImGui::TableNextColumn();
-            ImGui::Text("%.3f", it->freqMHz);
-            ImGui::TableNextColumn();
-            ImGui::TextColored(col, "%s", it->text.c_str());
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(it->hex.c_str());
-        }
-        ImGui::EndTable();
-    }
-
-    ImGui::End();
-}
-
-// POCSAG / FLEX pager messages (auto-detected). Fed by "Pager" decoders.
 void drawPager(App& app)
 {
     ImGui::Begin((std::string(_L("Pager")) + "###Pager").c_str());
@@ -1588,7 +1505,6 @@ void drawDockHost(App& app)
             ImGui::DockBuilderDockWindow((std::string(_L("Spectrum (B)")) + "###Spectrum (B)").c_str(), rtopR);
             ImGui::DockBuilderDockWindow((std::string(_L("Waterfall (B)")) + "###Waterfall (B)").c_str(), rmidR);
         }
-        ImGui::DockBuilderDockWindow((std::string(_L("Placeholder")) + "###Placeholder").c_str(), rbot);
         ImGui::DockBuilderDockWindow((std::string(_L("Pager")) + "###Pager").c_str(), rbot);
         ImGui::DockBuilderDockWindow((std::string(_L("Constellation")) + "###Constellation").c_str(), rcon);
         ImGui::DockBuilderFinish(dockId);
