@@ -116,14 +116,19 @@ int DecoderManager::addDecoderImpl(double freqHz, int baud, uint32_t aesId)
     // 1) Find the best existing sub-band that covers this frequency.
     //    If a sub-band is overloaded (>4 decoders), prefer a shadow
     //    sub-band on a lighter worker to spread the load.
+    //    WFM channels are wideband and steer their own front-end, so they always
+    //    get a dedicated sub-band and never share one (in either direction).
     Worker* bestW = nullptr;
     std::shared_ptr<SubBand> bestSb;
     int bestLoad = 0x7FFFFFFF; // total decoders on that worker
+    if (baud != kWfmBaud)
     for (auto& w : workers_)
     {
         std::lock_guard<std::mutex> lk(w->dMtx);
         for (auto& sb : w->subbands)
         {
+            if (!sb->decoders.empty() && sb->decoders.front()->isWfm())
+                continue; // never join a WFM sub-band
             if (std::fabs(freqHz - sb->centerHz) < 0.40 * sb->subRate)
             {
                 int cnt = (int)sb->decoders.size();
@@ -231,9 +236,19 @@ void DecoderManager::setDecoderFreq(int channelId, double freqHz)
             for (auto& d : sb->decoders)
                 if (d->channelId() == channelId)
                 {
-                    d->setFreq(freqHz); // stays within the sub-band's IF window
+                    if (d->isWfm())
+                    {
+                        // Wideband: move the whole front-end onto the station so
+                        // it gets real selectivity (no aliasing from a fixed IF).
+                        d->setFreq(freqHz);
+                        sb->recenter(freqHz);
+                    }
+                    else
+                    {
+                        d->setFreq(freqHz); // stays within the sub-band's IF window
+                    }
                     return;
-        }
+                }
     }
 }
 

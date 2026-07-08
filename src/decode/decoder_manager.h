@@ -83,11 +83,23 @@ private:
     {
         SubBand(double Fs, double wideCenterHz, double center, double rateTarget,
                 double bw)
-            : centerHz(center), frontEnd(Fs, center - wideCenterHz, rateTarget, bw)
+            : centerHz(center), wideCenterHz(wideCenterHz),
+              frontEnd(Fs, center - wideCenterHz, rateTarget, bw)
         {
             subRate = frontEnd.outputRate();
         }
+        // Re-centre the shared front-end on a new absolute frequency (Hz) and
+        // re-point every decoder in this sub-band. Used to make a wideband (WFM)
+        // channel follow the station instead of aliasing on the fixed IF.
+        void recenter(double newCenterHz)
+        {
+            centerHz = newCenterHz;
+            frontEnd.setOffset(newCenterHz - wideCenterHz);
+            for (auto& d : decoders)
+                d->setSubCenter(newCenterHz);
+        }
         double centerHz;
+        double wideCenterHz;          // absolute centre of the wideband stream
         double subRate = 0.0;
         Ddc frontEnd;                 // Fs -> subRate (shared by all decoders)
         std::vector<double> subIQ;    // scratch (worker thread only)

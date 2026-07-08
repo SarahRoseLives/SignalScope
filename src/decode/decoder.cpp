@@ -92,6 +92,12 @@ void Decoder::setFreq(double chanFreqHz)
     ddc_.setOffset(chanFreqHz - subCenterHz_);
 }
 
+void Decoder::setSubCenter(double subCenterHz)
+{
+    subCenterHz_ = subCenterHz;
+    ddc_.setOffset(chanFreqHz_ - subCenterHz_);
+}
+
 bool Decoder::locked() const
 {
     return egc_ ? egc_->locked() : false;

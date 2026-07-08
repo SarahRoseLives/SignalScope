@@ -43,6 +43,11 @@ public:
     // Retune to a new absolute channel frequency (Hz).
     void setFreq(double chanFreqHz);
 
+    // Re-point this decoder at a new sub-band centre (Hz). Used when the shared
+    // front-end DDC is re-centred to follow a wideband (WFM) channel, so the
+    // per-channel NCO offset stays near zero.
+    void setSubCenter(double subCenterHz);
+
     bool   locked() const;
     // Copy up to maxPairs constellation points (interleaved I,Q doubles into
     // iqOut, capacity >= 2*maxPairs). Returns the number of pairs written.
