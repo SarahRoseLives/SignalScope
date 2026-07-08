@@ -35,8 +35,12 @@
 // Map the "Decode type" combo index to the baud code used by the decoders.
 static int baudFromComboIndex(int idx)
 {
-    (void)idx;
-    return kWfmBaud;
+    switch (idx)
+    {
+        case 1:  return kAutoBaud; // Pager: POCSAG + FLEX auto-detect
+        case 0:
+        default: return kWfmBaud;  // WFM broadcast audio
+    }
 }
 
 // Kick off source startup. Most backends open instantly, but LibreSDR/UHD
@@ -712,7 +716,7 @@ void drawControls(App& app)
     }
 
     ImGui::Separator();
-    const char* bauds[] = {"WFM (broadcast audio)"};
+    const char* bauds[] = {"WFM (broadcast audio)", "Pager (POCSAG/FLEX auto)"};
     const int kNumBauds = (int)(sizeof(bauds) / sizeof(bauds[0]));
     if (app.newBaud < 0 || app.newBaud >= kNumBauds)
         app.newBaud = 0;
@@ -1170,6 +1174,8 @@ void drawDecoders(App& app)
             }
             else if (d.baud == kWfmBaud)
                 ImGui::TextUnformatted("WFM");
+            else if (d.baud == kAutoBaud)
+                ImGui::TextUnformatted("Pager");
             else
                 ImGui::Text("%d", d.baud);
             ImGui::TableNextColumn();
@@ -1280,6 +1286,87 @@ void drawSUs(App& app)
             ImGui::TextColored(col, "%s", it->text.c_str());
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(it->hex.c_str());
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::End();
+}
+
+// POCSAG / FLEX pager messages (auto-detected). Fed by "Pager" decoders.
+void drawPager(App& app)
+{
+    ImGui::Begin((std::string(_L("Pager")) + "###Pager").c_str());
+
+    unsigned long long total = app.decoders.pagerLog().count();
+    if (app.dualMode) total += app.decodersB.pagerLog().count();
+    ImGui::Text("%llu total", total);
+    ImGui::SameLine();
+    if (ImGui::SmallButton(_L("Clear")))
+    {
+        app.decoders.pagerLog().clear();
+        if (app.dualMode) app.decodersB.pagerLog().clear();
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(-1.0f);
+    ImGui::InputTextWithHint("##searchpgr", "Search...", app.searchBuf, sizeof(app.searchBuf));
+
+    ImGui::Separator();
+
+    auto msgs = app.decoders.pagerLog().snapshot();
+    if (app.dualMode)
+    {
+        auto b = app.decodersB.pagerLog().snapshot();
+        msgs.insert(msgs.end(), b.begin(), b.end());
+    }
+    std::sort(msgs.begin(), msgs.end(),
+              [](const PagerMessage& a, const PagerMessage& b) { return a.timeSec > b.timeSec; });
+    std::string searchLower;
+    bool hasSearch = (app.searchBuf[0] != 0);
+    if (hasSearch)
+    {
+        searchLower = app.searchBuf;
+        for (auto& ch : searchLower) ch = (char)std::tolower((unsigned char)ch);
+    }
+    if (ImGui::BeginTable("##pgrmsgs", 5,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable))
+    {
+        ImGui::TableSetupColumn("Freq", ImGuiTableColumnFlags_WidthFixed, 70);
+        ImGui::TableSetupColumn("Proto", ImGuiTableColumnFlags_WidthFixed, 60);
+        ImGui::TableSetupColumn("Addr", ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("Func", ImGuiTableColumnFlags_WidthFixed, 45);
+        ImGui::TableSetupColumn("Message");
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
+
+        for (auto it = msgs.begin(); it != msgs.end(); ++it)
+        {
+            if (hasSearch)
+            {
+                std::string hay = it->text + "|" + it->numeric;
+                for (auto& ch : hay) ch = (char)std::tolower((unsigned char)ch);
+                if (hay.find(searchLower) == std::string::npos)
+                    continue;
+            }
+            ImGui::TableNextRow();
+
+            ImVec4 col = (it->protocol == 1) ? ImVec4(0.3f, 0.8f, 1.0f, 1.0f)
+                                             : ImVec4(1.0f, 0.7f, 0.2f, 1.0f);
+
+            ImGui::TableNextColumn();
+            ImGui::Text("%.3f", it->freqMHz);
+            ImGui::TableNextColumn();
+            ImGui::TextColored(col, "%s", it->protocolName.c_str());
+            ImGui::TableNextColumn();
+            ImGui::Text("%u", it->address);
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", it->function);
+            ImGui::TableNextColumn();
+            if (!it->text.empty())
+                ImGui::TextUnformatted(it->text.c_str());
+            else if (!it->numeric.empty())
+                ImGui::TextUnformatted(it->numeric.c_str());
         }
         ImGui::EndTable();
     }
@@ -1502,6 +1589,7 @@ void drawDockHost(App& app)
             ImGui::DockBuilderDockWindow((std::string(_L("Waterfall (B)")) + "###Waterfall (B)").c_str(), rmidR);
         }
         ImGui::DockBuilderDockWindow((std::string(_L("Placeholder")) + "###Placeholder").c_str(), rbot);
+        ImGui::DockBuilderDockWindow((std::string(_L("Pager")) + "###Pager").c_str(), rbot);
         ImGui::DockBuilderDockWindow((std::string(_L("Constellation")) + "###Constellation").c_str(), rcon);
         ImGui::DockBuilderFinish(dockId);
     }

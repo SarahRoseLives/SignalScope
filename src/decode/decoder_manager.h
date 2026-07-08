@@ -77,6 +77,7 @@ public:
     AircraftTable& aircraftTable() { return acTable_; }
     const AircraftTable& aircraftTable() const { return acTable_; }
     LesFreqTable& lesFreqTable() { return lesFreqTable_; }
+    PagerLog& pagerLog() { return pagerLog_; }
 
 private:
     struct SubBand
@@ -145,6 +146,7 @@ private:
     LesFreqTable lesFreqTable_;
     int maxWorkers_ = 8;
 
+    PagerLog pagerLog_;
     AudioSink* audioSink_ = nullptr;
     std::atomic<int> audioChannel_{0}; // channelId currently playing audio (0 = none)
 };

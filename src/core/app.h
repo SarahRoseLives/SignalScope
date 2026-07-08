@@ -222,4 +222,4 @@ constexpr const char* kFftLabels[] = {"1024", "2048", "4096", "8192", "16384", "
 constexpr int kNumFftSizes = (int)(sizeof(kFftSizes) / sizeof(kFftSizes[0]));
 
 // Dock layout version: bump when the built-in default layout changes.
-constexpr int kLayoutVersion = 13;
+constexpr int kLayoutVersion = 14;

@@ -26,6 +26,7 @@ void drawSpectrum(App&, SpectrumView&, DecoderManager&, const char*, bool, bool)
 void drawWaterfall(App&, SpectrumView&, const char*);
 void drawDecoders(App&);
 void drawSUs(App&);
+void drawPager(App&);
 void drawConstellation(App&);
 void drawAbout(App&);
 

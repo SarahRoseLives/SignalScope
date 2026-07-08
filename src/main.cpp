@@ -227,6 +227,7 @@ int main(int, char**)
         }
         drawDecoders(app);
         drawSUs(app);
+        drawPager(app);
         drawConstellation(app);
         drawAbout(app);
 

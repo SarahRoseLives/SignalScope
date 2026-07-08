@@ -166,7 +166,7 @@ int DecoderManager::addDecoderImpl(double freqHz, int baud, uint32_t aesId)
         {
             if (sb != bestSb) continue;
             auto dec = std::make_shared<Decoder>(
-                sb->subRate, sb->centerHz, freqHz, baud, id, &log_, &suLog_, &cassign_, &netTable_, &egcLog_, &acTable_, &mesLog_, &lesLog_, &lesFreqTable_);
+                sb->subRate, sb->centerHz, freqHz, baud, id, &log_, &suLog_, &cassign_, &netTable_, &egcLog_, &acTable_, &mesLog_, &lesLog_, &lesFreqTable_, &pagerLog_);
             wireAudio(dec, audioSink_);
             sb->decoders.emplace_back(std::move(dec));
             bestW->count.fetch_add(1);
@@ -189,7 +189,7 @@ int DecoderManager::addDecoderImpl(double freqHz, int baud, uint32_t aesId)
     std::lock_guard<std::mutex> lk(best->dMtx);
     auto sb = std::make_shared<SubBand>(Fs_, centerHz_, freqHz, kSubRateTarget, kSubBW);
     auto dec = std::make_shared<Decoder>(
-        sb->subRate, sb->centerHz, freqHz, baud, id, &log_, &suLog_, &cassign_, &netTable_, &egcLog_, &acTable_, &mesLog_, &lesLog_, &lesFreqTable_);
+        sb->subRate, sb->centerHz, freqHz, baud, id, &log_, &suLog_, &cassign_, &netTable_, &egcLog_, &acTable_, &mesLog_, &lesLog_, &lesFreqTable_, &pagerLog_);
     wireAudio(dec, audioSink_);
     sb->decoders.emplace_back(std::move(dec));
     best->subbands.push_back(std::move(sb));

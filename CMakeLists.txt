@@ -129,13 +129,21 @@ add_executable(SignalScope
     src/decode/decoder_manager.cpp
     src/decode/band_plan.cpp
     src/decode/json_mini.cpp
+    src/decode/pocsag_decoder.cpp
     src/util/log.cpp
     src/decode/egc/egc_decoder.cpp
+    src/multimon_ng/multimon_lib.c
+    src/multimon_ng/demod_flex.c
+    src/multimon_ng/bch.c
+    src/multimon_ng/cJSON.c
+    src/multimon_ng/demod_stubs.c
+    src/multimon_ng/hdlc.c
     src/i18n/i18n.cpp
     src/update/version_check.cpp
 )
 target_include_directories(SignalScope PRIVATE
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/multimon_ng
     ${CMAKE_SOURCE_DIR}/third_party/miniaudio
     ${RTLSDR_INCLUDE_DIRS}
     ${HACKRF_INCLUDE_DIRS}
