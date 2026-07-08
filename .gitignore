@@ -1,0 +1,11 @@
+# Build output (keep firmware bin)
+/build/*
+!/build/libresdr_b210.bin
+
+# Runtime / logs
+log.txt
+
+# Object & archive files
+*.o
+*.a
+*.obj
