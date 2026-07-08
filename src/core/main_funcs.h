@@ -25,8 +25,7 @@ void drawControls(App&);
 void drawSpectrum(App&, SpectrumView&, DecoderManager&, const char*, bool, bool);
 void drawWaterfall(App&, SpectrumView&, const char*);
 void drawDecoders(App&);
-void drawPager(App&);
-void drawConstellation(App&);
+void drawMessages(App&);
 void drawAbout(App&);
 
 // state/config.cpp

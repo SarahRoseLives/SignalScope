@@ -36,8 +36,7 @@ void cfgWriteAll(App& app, ImGuiTextBuffer* buf)
 #define WF(f) buf->appendf(#f "=%g\n", (double)app.f)
 #define WD(f) buf->appendf(#f "=%.10g\n", (double)app.f)
 #define WS(f) buf->appendf(#f "=%s\n", app.f)
-    WI(sourceMode); WI(deviceIndex); WI(sampleRateIdx); WI(newBaud); WI(fftSizeIdx);
-    WI(autoAddLes); WI(maxLesAutoDecoders);
+    WI(sourceMode); WI(deviceIndex); WI(sampleRateIdx); WI(newTypeIdx); WI(fftSizeIdx);
     WD(centerFreqMHz);
     WF(iqBufferSec);
     WI(autoGain); WF(gainDb); WI(biasTee); WF(ppm); WI(dcBlock);
@@ -59,8 +58,6 @@ void cfgWriteAll(App& app, ImGuiTextBuffer* buf)
     WI(deviceIndexB); WD(centerFreqMHzB); WI(sampleRateIdxB);
     WI(autoGainB); WF(gainDbB); WI(biasTeeB); WF(ppmB);
     WI(saveDecoders);
-    WI(acPosOnly);
-    WI(showEmptyMsgs);
     WI(showBandPlan); WI(bandPlanIdx); WI(showBandPlanB); WI(bandPlanIdxB); WS(bandPlanDir);
     WI(layoutVersion);
     WI(fontSize);
@@ -96,8 +93,7 @@ void cfgReadLine(App& app, const char* line)
 #define RF(f) if (!std::strcmp(key, #f)) { app.f = (float)std::atof(val); return; }
 #define RD(f) if (!std::strcmp(key, #f)) { app.f = std::atof(val); return; }
 #define RS(f) if (!std::strcmp(key, #f)) { std::strncpy(app.f, val, sizeof(app.f) - 1); app.f[sizeof(app.f) - 1] = 0; return; }
-    RI(sourceMode); RI(deviceIndex); RI(sampleRateIdx); RI(newBaud); RI(fftSizeIdx);
-    RB(autoAddLes); RI(maxLesAutoDecoders);
+    RI(sourceMode); RI(deviceIndex); RI(sampleRateIdx); RI(newTypeIdx); RI(fftSizeIdx);
     RD(centerFreqMHz);
     RF(iqBufferSec);
     RB(autoGain); RF(gainDb); RB(biasTee); RF(ppm); RB(dcBlock);
@@ -134,8 +130,6 @@ void cfgReadLine(App& app, const char* line)
             app.savedDecodersB.push_back({f, b});
         return;
     }
-    RB(acPosOnly);
-    RB(showEmptyMsgs);
     RB(showBandPlan); RI(bandPlanIdx); RB(showBandPlanB); RI(bandPlanIdxB); RS(bandPlanDir);
     RI(layoutVersion);
     RI(fontSize);

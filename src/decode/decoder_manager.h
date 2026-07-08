@@ -5,7 +5,7 @@
 #pragma once
 
 #include "decode/decoder.h"
-#include "decode/message_log.h"
+#include "decode/channel/message_bus.h"
 #include "dsp/ddc.h"
 
 #include <atomic>
@@ -26,12 +26,8 @@ public:
     {
         int channelId;
         double freqMHz;
-        int baud;
+        int typeId;
         bool locked;
-        uint64_t msgs;
-        int egcBer;     // -1 unless EGC
-        int egcFrames;  // 0 unless EGC
-        int egcCType;   // 0=unknown, 1=NCS, 2=LES TDM, 3=Joint, 4=Standby
         bool isB       = false; // from decodersB (dual RTL)
         bool isAudio   = false; // audio channel (WFM/AM/NFM) routable to speaker
         bool audioOn   = false; // currently routed to the speaker
@@ -43,8 +39,8 @@ public:
     void start();
     void stop();
 
-    // Attach the shared audio sink; WFM decoders route their audio here when
-    // selected. Set before adding WFM decoders.
+    // Attach the shared audio sink; audio decoders route their output here when
+    // selected. Set before adding audio decoders.
     void setAudioSink(AudioSink* sink) { audioSink_ = sink; }
 
     // Make the given channel the one that plays audio (or 0 to mute all).
@@ -57,7 +53,8 @@ public:
 
     void feed(const float* iq, int nComplex);
 
-    int addDecoder(double freqHz, int baud, uint32_t aesId = 0);    void removeDecoder(int channelId);
+    int  addDecoder(double freqHz, int typeId);
+    void removeDecoder(int channelId);
     void setDecoderFreq(int channelId, double freqHz);
     void removeAll();
     int  decoderCount();
@@ -65,19 +62,8 @@ public:
     int  subbandCount();
 
     std::vector<Status> status();
-    int getConstellation(int channelId, std::vector<float>& out, int maxPairs);
     uint64_t drops() const { return drops_.load(); }
-    MessageLog& log() { return log_; }
-    MessageLog& suLog() { return suLog_; }
-    CassignLog& cassignLog() { return cassign_; }
-    ChannelTable& channelTable() { return netTable_; }
-    EgcLog& egcLog() { return egcLog_; }
-    MesLog& mesLog() { return mesLog_; }
-    LesLog& lesLog() { return lesLog_; }
-    AircraftTable& aircraftTable() { return acTable_; }
-    const AircraftTable& aircraftTable() const { return acTable_; }
-    LesFreqTable& lesFreqTable() { return lesFreqTable_; }
-    PagerLog& pagerLog() { return pagerLog_; }
+    MessageBus& bus() { return bus_; }
 
 private:
     struct SubBand
@@ -90,8 +76,8 @@ private:
             subRate = frontEnd.outputRate();
         }
         // Re-centre the shared front-end on a new absolute frequency (Hz) and
-        // re-point every decoder in this sub-band. Used to make a wideband (WFM)
-        // channel follow the station instead of aliasing on the fixed IF.
+        // re-point every decoder in this sub-band. Used to make a wideband
+        // channel follow the signal instead of aliasing on the fixed IF.
         void recenter(double newCenterHz)
         {
             centerHz = newCenterHz;
@@ -117,12 +103,12 @@ private:
         std::mutex dMtx; // guards subbands
         std::vector<std::shared_ptr<SubBand>> subbands;
         std::atomic<int> count{0};   // total decoders on this worker
-        std::atomic<int> weight{0};  // weighted load (MSK=3, OQPSK=2, EGC=1)
+        std::atomic<int> weight{0};  // weighted load
     };
 
     void workerLoop(Worker* w);
 
-    int addDecoderImpl(double freqHz, int baud, uint32_t aesId);
+    int addDecoderImpl(double freqHz, int typeId);
 
     double Fs_ = 0.0;
     double centerHz_ = 0.0;
@@ -135,18 +121,9 @@ private:
 
     std::atomic<uint64_t> drops_{0};
     static constexpr size_t kMaxQueue = 192;
-    MessageLog log_;
-    MessageLog suLog_;
-    CassignLog cassign_;
-    ChannelTable netTable_;
-    EgcLog egcLog_;
-    MesLog mesLog_;
-    LesLog lesLog_;
-    AircraftTable acTable_;
-    LesFreqTable lesFreqTable_;
+    MessageBus bus_;
     int maxWorkers_ = 8;
 
-    PagerLog pagerLog_;
     AudioSink* audioSink_ = nullptr;
     std::atomic<int> audioChannel_{0}; // channelId currently playing audio (0 = none)
 };

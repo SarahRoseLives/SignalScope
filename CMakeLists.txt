@@ -127,11 +127,12 @@ add_executable(SignalScope
     src/gui/waterfall.cpp
     src/decode/decoder.cpp
     src/decode/decoder_manager.cpp
+    src/decode/channel/audio_decoder.cpp
+    src/decode/channel/pager_decoder.cpp
     src/decode/band_plan.cpp
     src/decode/json_mini.cpp
     src/decode/pocsag_decoder.cpp
     src/util/log.cpp
-    src/decode/egc/egc_decoder.cpp
     src/multimon_ng/multimon_lib.c
     src/multimon_ng/demod_flex.c
     src/multimon_ng/bch.c

@@ -114,18 +114,14 @@ struct App
     bool   biasTeeB = false;
     float  ppmB = 0.0f;
 
-    int  newBaud = 1;
+    int  newTypeIdx = 0;           // index into ChannelRegistry::all()
     bool placingDecoder = false;
     bool placingVoiceView = false; // true = started on voice SDR, false = primary
     double placingFreqMHz = 0.0;
-    int  selectedDecoder = -1;
-    std::vector<float> constBuf;
-    double constLim = 1.0;
-    std::chrono::steady_clock::time_point constLimTime;
 
     bool saveDecoders = false; // save decoders in INI for restart
-    std::vector<std::pair<double,int>> savedDecoders;  // freqMHz, baud  (spectrum A)
-    std::vector<std::pair<double,int>> savedDecodersB; // freqMHz, baud  (spectrum B)
+    std::vector<std::pair<double,int>> savedDecoders;  // freqMHz, typeId  (spectrum A)
+    std::vector<std::pair<double,int>> savedDecodersB; // freqMHz, typeId  (spectrum B)
 
     // IQ recorder
     IqRecorder iqRecorder;
@@ -139,8 +135,6 @@ struct App
     bool  audioMuted = false;
 
     bool showAbout = false;
-    bool autoAddLes = true;       // auto-create decoders for discovered LES frequencies
-    int  maxLesAutoDecoders = 4;  // cap on auto-created LES decoders
 
     VersionCheck verCheck;
 
@@ -179,8 +173,6 @@ struct App
     float  browseEdgePct = 24.5f;
     float  browseThrottleMs = 20.0f;
     float  browseMinMovePct = 0.10f;
-    bool   acPosOnly = false;
-    bool   showEmptyMsgs = false;
     bool   showBandPlan = false;
     bool   showBandPlanB = false;
     std::vector<std::string> bandPlanNames;  // display names (shared)
@@ -191,7 +183,7 @@ struct App
     BandPlan bandPlanLoadedB;
     char   bandPlanDir[256] = "bandplans";
 
-    // Shared search buffer for the Messages / SUs / EGC / LES panels.
+    // Shared search buffer for the Messages panel.
     char searchBuf[128] = {};
 
     int  layoutVersion = 0;
@@ -222,4 +214,4 @@ constexpr const char* kFftLabels[] = {"1024", "2048", "4096", "8192", "16384", "
 constexpr int kNumFftSizes = (int)(sizeof(kFftSizes) / sizeof(kFftSizes[0]));
 
 // Dock layout version: bump when the built-in default layout changes.
-constexpr int kLayoutVersion = 15;
+constexpr int kLayoutVersion = 16;

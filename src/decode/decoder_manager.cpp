@@ -1,5 +1,6 @@
 #include "decode/decoder_manager.h"
 
+#include "decode/channel/channel_registry.h"
 #include "audio/audio_sink.h"
 
 #include <algorithm>
@@ -13,14 +14,21 @@
 static constexpr double kSubRateTarget = 250000.0;
 static constexpr double kSubBW = 200000.0;
 
-// Heavier decoders consume more CPU per block.  EGC is very light, OQPSK
-// moderate, MSK the heaviest (coarse frequency estimator + matched filters).
-static int decoderWeight(int baud)
+// Per-type properties come from the channel registry.
+static int typeWeight(int typeId)
 {
-    if (baud == kEgcBaud) return 1;
-    if (baud == kWfmBaud) return 3; // wideband DDC + discriminator + resample
-    if (baud == 8400 || baud == 10500) return 2;
-    return 3; // 600 / 1200 MSK
+    const ChannelDecoderInfo* info = ChannelRegistry::instance().byType(typeId);
+    return info ? info->weight : 3;
+}
+static bool typeDedicatedSubband(int typeId)
+{
+    const ChannelDecoderInfo* info = ChannelRegistry::instance().byType(typeId);
+    return info && info->dedicatedSubband;
+}
+static bool typeIsAudio(int typeId)
+{
+    const ChannelDecoderInfo* info = ChannelRegistry::instance().byType(typeId);
+    return info && info->isAudio;
 }
 
 void DecoderManager::configure(double Fs, double centerHz)
@@ -29,14 +37,6 @@ void DecoderManager::configure(double Fs, double centerHz)
     centerHz_ = centerHz;
 }
 
-// Attach the audio sink to a freshly created audio (WFM/AM/NFM) decoder. Newly
-// added audio channels start muted; the UI selects which one plays via
-// setAudioChannel().
-static void wireAudio(const std::shared_ptr<Decoder>& d, AudioSink* sink)
-{
-    if (sink && d->isAudio())
-        d->setAudioSink(sink);
-}
 void DecoderManager::start()
 {
     if (run_.load())
@@ -91,20 +91,19 @@ void DecoderManager::feed(const float* iq, int nComplex)
     }
 }
 
-int DecoderManager::addDecoder(double freqHz, int baud, uint32_t aesId)
+int DecoderManager::addDecoder(double freqHz, int typeId)
 {
-    int id = addDecoderImpl(freqHz, baud, aesId);
+    int id = addDecoderImpl(freqHz, typeId);
     // Auto-play: dropping an audio channel (WFM/AM/NFM) immediately routes it to
     // the speaker (no separate "Listen" click needed). Done after the add so all
     // locks are released. setAudioChannel would toggle off if id already active,
     // so only call it when this id isn't already the audio channel.
-    bool isAudio = (baud == kWfmBaud || baud == kAmBaud || baud == kNfmBaud);
-    if (id > 0 && isAudio && audioChannel_.load() != id)
+    if (id > 0 && typeIsAudio(typeId) && audioChannel_.load() != id)
         setAudioChannel(id);
     return id;
 }
 
-int DecoderManager::addDecoderImpl(double freqHz, int baud, uint32_t aesId)
+int DecoderManager::addDecoderImpl(double freqHz, int typeId)
 {
     if (Fs_ <= 0.0 || workers_.empty())
         return -1;
@@ -115,22 +114,24 @@ int DecoderManager::addDecoderImpl(double freqHz, int baud, uint32_t aesId)
         id = nextId_++;
     }
 
+    const bool dedicated = typeDedicatedSubband(typeId);
+
     // 1) Find the best existing sub-band that covers this frequency.
     //    If a sub-band is overloaded (>4 decoders), prefer a shadow
     //    sub-band on a lighter worker to spread the load.
-    //    WFM channels are wideband and steer their own front-end, so they always
-    //    get a dedicated sub-band and never share one (in either direction).
+    //    Wideband (dedicated-subband) channels steer their own front-end, so they
+    //    always get a dedicated sub-band and never share one (in either direction).
     Worker* bestW = nullptr;
     std::shared_ptr<SubBand> bestSb;
     int bestLoad = 0x7FFFFFFF; // total decoders on that worker
-    if (baud != kWfmBaud)
+    if (!dedicated)
     for (auto& w : workers_)
     {
         std::lock_guard<std::mutex> lk(w->dMtx);
         for (auto& sb : w->subbands)
         {
-            if (!sb->decoders.empty() && sb->decoders.front()->isWfm())
-                continue; // never join a WFM sub-band
+            if (!sb->decoders.empty() && typeDedicatedSubband(sb->decoders.front()->typeId()))
+                continue; // never join a dedicated (wideband) sub-band
             if (std::fabs(freqHz - sb->centerHz) < 0.40 * sb->subRate)
             {
                 int cnt = (int)sb->decoders.size();
@@ -168,11 +169,10 @@ int DecoderManager::addDecoderImpl(double freqHz, int baud, uint32_t aesId)
         {
             if (sb != bestSb) continue;
             auto dec = std::make_shared<Decoder>(
-                sb->subRate, sb->centerHz, freqHz, baud, id, &log_, &suLog_, &cassign_, &netTable_, &egcLog_, &acTable_, &mesLog_, &lesLog_, &lesFreqTable_, &pagerLog_);
-            wireAudio(dec, audioSink_);
+                sb->subRate, sb->centerHz, freqHz, typeId, id, &bus_, audioSink_);
             sb->decoders.emplace_back(std::move(dec));
             bestW->count.fetch_add(1);
-            bestW->weight.fetch_add(decoderWeight(baud));
+            bestW->weight.fetch_add(typeWeight(typeId));
             return id;
         }
         // Sub-band was removed between locks — fall through to creation.
@@ -191,12 +191,11 @@ int DecoderManager::addDecoderImpl(double freqHz, int baud, uint32_t aesId)
     std::lock_guard<std::mutex> lk(best->dMtx);
     auto sb = std::make_shared<SubBand>(Fs_, centerHz_, freqHz, kSubRateTarget, kSubBW);
     auto dec = std::make_shared<Decoder>(
-        sb->subRate, sb->centerHz, freqHz, baud, id, &log_, &suLog_, &cassign_, &netTable_, &egcLog_, &acTable_, &mesLog_, &lesLog_, &lesFreqTable_, &pagerLog_);
-    wireAudio(dec, audioSink_);
+        sb->subRate, sb->centerHz, freqHz, typeId, id, &bus_, audioSink_);
     sb->decoders.emplace_back(std::move(dec));
     best->subbands.push_back(std::move(sb));
     best->count.fetch_add(1);
-    best->weight.fetch_add(decoderWeight(baud));
+    best->weight.fetch_add(typeWeight(typeId));
     return id;
 }
 
@@ -211,7 +210,7 @@ void DecoderManager::removeDecoder(int channelId)
             for (auto it = decs.begin(); it != decs.end(); ++it)
                 if ((*it)->channelId() == channelId)
                 {
-                    int baudOfRemoved = (*it)->baud();
+                    int typeOfRemoved = (*it)->typeId();
                     if (audioChannel_.load() == channelId)
                     {
                         (*it)->setAudioActive(false);
@@ -220,7 +219,7 @@ void DecoderManager::removeDecoder(int channelId)
                     }
                     decs.erase(it);
                     w->count.fetch_sub(1);
-                    w->weight.fetch_sub(decoderWeight(baudOfRemoved));
+                    w->weight.fetch_sub(typeWeight(typeOfRemoved));
                     if (decs.empty())
                         w->subbands.erase(sbIt); // drop now-empty sub-band
                     return;
@@ -238,9 +237,9 @@ void DecoderManager::setDecoderFreq(int channelId, double freqHz)
             for (auto& d : sb->decoders)
                 if (d->channelId() == channelId)
                 {
-                    if (d->isWfm())
+                    if (typeDedicatedSubband(d->typeId()))
                     {
-                        // Wideband: move the whole front-end onto the station so
+                        // Wideband: move the whole front-end onto the signal so
                         // it gets real selectivity (no aliasing from a fixed IF).
                         d->setFreq(freqHz);
                         sb->recenter(freqHz);
@@ -327,9 +326,7 @@ std::vector<DecoderManager::Status> DecoderManager::status()
         for (auto& sb : w->subbands)
             for (auto& d : sb->decoders)
             {
-                Status s{d->channelId(), d->freqMHz(), d->baud(),
-                         d->locked(), d->msgCount(),
-                         d->egcBer(), d->egcFrames(), d->egcChannelType()};
+                Status s{d->channelId(), d->freqMHz(), d->typeId(), d->locked()};
                 s.isAudio = d->isAudio();
                 s.audioOn = d->audioActive();
                 out.push_back(s);
@@ -338,27 +335,6 @@ std::vector<DecoderManager::Status> DecoderManager::status()
     std::sort(out.begin(), out.end(),
               [](const Status& a, const Status& b) { return a.freqMHz < b.freqMHz; });
     return out;
-}
-
-int DecoderManager::getConstellation(int channelId, std::vector<float>& out, int maxPairs)
-{
-    std::vector<double> tmp((size_t)maxPairs * 2);
-    for (auto& w : workers_)
-    {
-        std::lock_guard<std::mutex> lk(w->dMtx);
-        for (auto& sb : w->subbands)
-            for (auto& d : sb->decoders)
-                if (d->channelId() == channelId)
-                {
-                    int pairs = d->getConstellation(tmp.data(), maxPairs);
-                    out.resize((size_t)pairs * 2);
-                    for (int i = 0; i < pairs * 2; ++i)
-                        out[i] = (float)tmp[i];
-                    return pairs;
-                }
-    }
-    out.clear();
-    return 0;
 }
 
 void DecoderManager::workerLoop(Worker* w)

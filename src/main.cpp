@@ -192,17 +192,15 @@ int main(int, char**)
         if (app.active->running())
             updateRateChange(app);
 
-        // Refresh saved decoder list for persistent restart (non-8400 only)
+        // Refresh saved decoder list for persistent restart.
         if (app.saveDecoders && app.active->running())
         {
             app.savedDecoders.clear();
             for (auto& st : app.decoders.status())
-                if (st.baud != 8400)
-                    app.savedDecoders.push_back({st.freqMHz, st.baud});
+                app.savedDecoders.push_back({st.freqMHz, st.typeId});
             app.savedDecodersB.clear();
             for (auto& st : app.decodersB.status())
-                if (st.baud != 8400)
-                    app.savedDecodersB.push_back({st.freqMHz, st.baud});
+                app.savedDecodersB.push_back({st.freqMHz, st.typeId});
         }
 
         drawControls(app);
@@ -226,8 +224,7 @@ int main(int, char**)
             }
         }
         drawDecoders(app);
-        drawPager(app);
-        drawConstellation(app);
+        drawMessages(app);
         drawAbout(app);
 
         int display_w, display_h;

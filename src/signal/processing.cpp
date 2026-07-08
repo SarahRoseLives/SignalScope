@@ -138,7 +138,7 @@ void updateRateChange(App& app)
 
     std::vector<std::pair<double, int>> keep;
     for (auto& s : app.decoders.status())
-        keep.push_back({s.freqMHz, s.baud});
+        keep.push_back({s.freqMHz, s.typeId});
     double center = app.active->centerFreq();
     app.decoders.removeAll();
     app.decoders.configure(fs, center);

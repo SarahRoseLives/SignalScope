@@ -7,6 +7,8 @@
 #include "core/app.h"
 #include "core/main_funcs.h"
 #include "decode/band_plan.h"
+#include "decode/channel/channel_registry.h"
+#include "decode/channel/message_bus.h"
 #include "i18n/i18n.h"
 #include "util/log.h"
 #include "version.h"
@@ -32,17 +34,13 @@
 #include <shellapi.h>
 #endif
 
-// Map the "Decode type" combo index to the baud code used by the decoders.
-static int baudFromComboIndex(int idx)
+// Map the "Decode type" combo index (into ChannelRegistry::all()) to a typeId.
+static int typeIdFromComboIndex(int idx)
 {
-    switch (idx)
-    {
-        case 1:  return kAmBaud;   // AM audio
-        case 2:  return kNfmBaud;  // narrowband FM audio
-        case 3:  return kAutoBaud; // Pager: POCSAG + FLEX auto-detect
-        case 0:
-        default: return kWfmBaud;  // WFM broadcast audio
-    }
+    const auto& all = ChannelRegistry::instance().all();
+    if (idx < 0 || idx >= (int)all.size())
+        return all.empty() ? 0 : all.front().typeId;
+    return all[idx].typeId;
 }
 
 // Kick off source startup. Most backends open instantly, but LibreSDR/UHD
@@ -717,15 +715,21 @@ void drawControls(App& app)
     }
 
     ImGui::Separator();
-    const char* bauds[] = {"WFM (broadcast audio)", "AM (audio)", "NFM (audio)", "Pager (POCSAG/FLEX auto)"};
-    const int kNumBauds = (int)(sizeof(bauds) / sizeof(bauds[0]));
-    if (app.newBaud < 0 || app.newBaud >= kNumBauds)
-        app.newBaud = 0;
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.18f, 0.42f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.15f, 0.28f, 0.60f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.12f, 0.22f, 0.50f, 1.0f));
-    ImGui::Combo(_L("Decode type"), &app.newBaud, bauds, kNumBauds);
-    ImGui::PopStyleColor(3);
+    {
+        const auto& reg = ChannelRegistry::instance().all();
+        std::vector<const char*> names;
+        names.reserve(reg.size());
+        for (const auto& info : reg)
+            names.push_back(info.name.c_str());
+        if (app.newTypeIdx < 0 || app.newTypeIdx >= (int)names.size())
+            app.newTypeIdx = 0;
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.18f, 0.42f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.15f, 0.28f, 0.60f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.12f, 0.22f, 0.50f, 1.0f));
+        if (!names.empty())
+            ImGui::Combo(_L("Decode type"), &app.newTypeIdx, names.data(), (int)names.size());
+        ImGui::PopStyleColor(3);
+    }
     ImGui::TextDisabled("Ctrl+click the spectrum to add a decoder there");
 
     ImGui::Separator();
@@ -889,7 +893,7 @@ void drawSpectrum(App& app, SpectrumView& v, DecoderManager& mgr, const char* ti
                     // Retune SDR B preserving decoders on manager B
                     std::vector<std::pair<double, int>> keep;
                     for (auto& s : app.decodersB.status())
-                        keep.push_back({s.freqMHz, s.baud});
+                        keep.push_back({s.freqMHz, s.typeId});
                     app.centerFreqMHzB = viewCtr;
                     app.sdrB.setCenterFreq(viewCtr * 1e6);
                     app.decodersB.removeAll();
@@ -932,7 +936,7 @@ void drawSpectrum(App& app, SpectrumView& v, DecoderManager& mgr, const char* ti
             if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && app.placingDecoder)
             {
                 app.placingDecoder = false;
-                mgr.addDecoder(mp.x * 1e6, baudFromComboIndex(app.newBaud));
+                mgr.addDecoder(mp.x * 1e6, typeIdFromComboIndex(app.newTypeIdx));
             }
         }
         else if (app.placingDecoder && app.placingVoiceView == voiceView)
@@ -1125,18 +1129,17 @@ void drawDecoders(App& app)
         if (ac != 0)
             ImGui::TextColored(ImVec4(0.3f, 1.0f, 0.5f, 1.0f), "Listening: ch %d", ac);
         else
-            ImGui::TextDisabled("Drop a WFM channel on the spectrum to hear audio");
+            ImGui::TextDisabled("Drop a WFM/AM/NFM channel on the spectrum to hear audio");
     }
 
     ImGui::Separator();
 
-    if (ImGui::BeginTable("##decs", 5,
+    if (ImGui::BeginTable("##decs", 4,
                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
     {
         ImGui::TableSetupColumn("Lock", ImGuiTableColumnFlags_WidthFixed, 36);
         ImGui::TableSetupColumn("Freq MHz");
-        ImGui::TableSetupColumn("Baud");
-        ImGui::TableSetupColumn("Msgs");
+        ImGui::TableSetupColumn("Type");
         ImGui::TableSetupColumn("");
         ImGui::TableHeadersRow();
 
@@ -1147,44 +1150,16 @@ void drawDecoders(App& app)
             int uid = d.channelId + (d.isB ? 100000 : 0);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            char selid[24];
-            std::snprintf(selid, sizeof(selid), "##sel%d", uid);
             ImVec4 c = d.locked ? ImVec4(0.2f, 1.0f, 0.3f, 1.0f)
                                 : ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
-            ImGui::PushStyleColor(ImGuiCol_Header, c);
-            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(c.x*1.3f, c.y*1.3f, c.z*1.3f, 1.0f));
-            bool sel = (app.selectedDecoder == d.channelId);
-            if (ImGui::Selectable(selid, sel, ImGuiSelectableFlags_None))
-            {
-                app.selectedDecoder = d.channelId;
-            }
-            ImGui::PopStyleColor(2);
-            ImGui::SameLine();
             ImGui::TextColored(c, "%s", d.locked ? "LOCK" : "--");
             ImGui::TableNextColumn();
             ImGui::Text("%.4f", d.freqMHz);
             ImGui::TableNextColumn();
-            if (d.baud == kEgcBaud)
             {
-                if (d.egcCType == 1)
-                    ImGui::TextUnformatted("EGC (NCS)");
-                else if (d.egcCType == 2)
-                    ImGui::TextUnformatted("EGC (LES)");
-                else
-                    ImGui::TextUnformatted("EGC");
+                const ChannelDecoderInfo* info = ChannelRegistry::instance().byType(d.typeId);
+                ImGui::TextUnformatted(info ? info->shortLabel.c_str() : "?");
             }
-            else if (d.baud == kWfmBaud)
-                ImGui::TextUnformatted("WFM");
-            else if (d.baud == kAmBaud)
-                ImGui::TextUnformatted("AM");
-            else if (d.baud == kNfmBaud)
-                ImGui::TextUnformatted("NFM");
-            else if (d.baud == kAutoBaud)
-                ImGui::TextUnformatted("Pager");
-            else
-                ImGui::Text("%d", d.baud);
-            ImGui::TableNextColumn();
-            ImGui::Text("%llu", (unsigned long long)d.msgs);
             ImGui::TableNextColumn();
             if (d.isAudio && !d.isB)
             {
@@ -1217,33 +1192,34 @@ void drawDecoders(App& app)
     ImGui::End();
 }
 
-void drawPager(App& app)
+// Generic decoded-messages panel, fed by every decoder via the MessageBus.
+void drawMessages(App& app)
 {
-    ImGui::Begin((std::string(_L("Pager")) + "###Pager").c_str());
+    ImGui::Begin((std::string(_L("Messages")) + "###Messages").c_str());
 
-    unsigned long long total = app.decoders.pagerLog().count();
-    if (app.dualMode) total += app.decodersB.pagerLog().count();
+    unsigned long long total = app.decoders.bus().count();
+    if (app.dualMode) total += app.decodersB.bus().count();
     ImGui::Text("%llu total", total);
     ImGui::SameLine();
     if (ImGui::SmallButton(_L("Clear")))
     {
-        app.decoders.pagerLog().clear();
-        if (app.dualMode) app.decodersB.pagerLog().clear();
+        app.decoders.bus().clear();
+        if (app.dualMode) app.decodersB.bus().clear();
     }
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputTextWithHint("##searchpgr", "Search...", app.searchBuf, sizeof(app.searchBuf));
+    ImGui::InputTextWithHint("##searchmsg", "Search...", app.searchBuf, sizeof(app.searchBuf));
 
     ImGui::Separator();
 
-    auto msgs = app.decoders.pagerLog().snapshot();
+    auto msgs = app.decoders.bus().snapshot();
     if (app.dualMode)
     {
-        auto b = app.decodersB.pagerLog().snapshot();
+        auto b = app.decodersB.bus().snapshot();
         msgs.insert(msgs.end(), b.begin(), b.end());
     }
     std::sort(msgs.begin(), msgs.end(),
-              [](const PagerMessage& a, const PagerMessage& b) { return a.timeSec > b.timeSec; });
+              [](const DecodedRecord& a, const DecodedRecord& b) { return a.timeSec > b.timeSec; });
     std::string searchLower;
     bool hasSearch = (app.searchBuf[0] != 0);
     if (hasSearch)
@@ -1251,14 +1227,12 @@ void drawPager(App& app)
         searchLower = app.searchBuf;
         for (auto& ch : searchLower) ch = (char)std::tolower((unsigned char)ch);
     }
-    if (ImGui::BeginTable("##pgrmsgs", 5,
+    if (ImGui::BeginTable("##busmsgs", 3,
                           ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                           ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable))
     {
         ImGui::TableSetupColumn("Freq", ImGuiTableColumnFlags_WidthFixed, 70);
-        ImGui::TableSetupColumn("Proto", ImGuiTableColumnFlags_WidthFixed, 60);
-        ImGui::TableSetupColumn("Addr", ImGuiTableColumnFlags_WidthFixed, 80);
-        ImGui::TableSetupColumn("Func", ImGuiTableColumnFlags_WidthFixed, 45);
+        ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed, 70);
         ImGui::TableSetupColumn("Message");
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableHeadersRow();
@@ -1267,151 +1241,20 @@ void drawPager(App& app)
         {
             if (hasSearch)
             {
-                std::string hay = it->text + "|" + it->numeric;
+                std::string hay = it->text + "|" + it->source;
                 for (auto& ch : hay) ch = (char)std::tolower((unsigned char)ch);
                 if (hay.find(searchLower) == std::string::npos)
                     continue;
             }
             ImGui::TableNextRow();
-
-            ImVec4 col = (it->protocol == 1) ? ImVec4(0.3f, 0.8f, 1.0f, 1.0f)
-                                             : ImVec4(1.0f, 0.7f, 0.2f, 1.0f);
-
             ImGui::TableNextColumn();
             ImGui::Text("%.3f", it->freqMHz);
             ImGui::TableNextColumn();
-            ImGui::TextColored(col, "%s", it->protocolName.c_str());
+            ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "%s", it->source.c_str());
             ImGui::TableNextColumn();
-            ImGui::Text("%u", it->address);
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", it->function);
-            ImGui::TableNextColumn();
-            if (!it->text.empty())
-                ImGui::TextUnformatted(it->text.c_str());
-            else if (!it->numeric.empty())
-                ImGui::TextUnformatted(it->numeric.c_str());
+            ImGui::TextUnformatted(it->text.c_str());
         }
         ImGui::EndTable();
-    }
-
-    ImGui::End();
-}
-
-// ImPlot getter over the interleaved (I,Q) float pairs in app.constBuf.
-static ImPlotPoint constGetter(int idx, void* data)
-{
-    const float* p = static_cast<const float*>(data);
-    return ImPlotPoint(p[2 * idx], p[2 * idx + 1]);
-}
-
-void drawConstellation(App& app)
-{
-    ImGui::Begin((std::string(_L("Constellation")) + "###Constellation").c_str());
-
-    auto decs = app.decoders.status();
-    if (app.dualMode)
-    {
-        auto decsB = app.decodersB.status();
-        for (auto& d : decsB) d.isB = true;
-        decs.insert(decs.end(), decsB.begin(), decsB.end());
-    }
-    int chan = app.selectedDecoder;
-    bool valid = false;
-    double freq = 0.0;
-    for (auto& d : decs)
-        if (d.channelId == chan)
-        {
-            valid = true;
-            freq = d.freqMHz;
-            break;
-        }
-    if (!valid && !decs.empty())
-    {
-        chan = decs.front().channelId;
-        freq = decs.front().freqMHz;
-    }
-
-    if (decs.empty())
-    {
-        ImGui::TextDisabled("No decoders. Ctrl+click the spectrum to add one.");
-        ImGui::End();
-        return;
-    }
-
-    // Decoder selector (also selectable by clicking a row in Decoders panel).
-    int preBaud = 0;
-    bool preIsB = false;
-    for (auto& d : decs)
-    {
-        if (d.channelId == chan)
-        {
-            preBaud = d.baud;
-            preIsB = d.isB;
-            break;
-        }
-    }
-    char preview[128];
-    const char* baudStr = (preBaud == kEgcBaud) ? "EGC" : nullptr;
-    if (baudStr)
-        std::snprintf(preview, sizeof(preview), "Channel %d  %.4f MHz  %s%s",
-                      chan, freq, baudStr, preIsB ? " [B]" : "");
-    else
-        std::snprintf(preview, sizeof(preview), "Channel %d  %.4f MHz  @%d%s",
-                      chan, freq, preBaud, preIsB ? " [B]" : "");
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("Decoder", preview))
-    {
-        for (auto& d : decs)
-        {
-            char label[64];
-            const char* b = (d.baud == kEgcBaud) ? "EGC" : nullptr;
-            if (b)
-                std::snprintf(label, sizeof(label), "Channel %d  %.4f MHz  %s%s",
-                              d.channelId, d.freqMHz, b,
-                              d.isB ? " [B]" : "");
-            else
-                std::snprintf(label, sizeof(label), "Channel %d  %.4f MHz  @%d%s",
-                              d.channelId, d.freqMHz, d.baud,
-                              d.isB ? " [B]" : "");
-            if (ImGui::Selectable(label, d.channelId == chan))
-            {
-                app.selectedDecoder = d.channelId;
-                chan = d.channelId;
-                freq = d.freqMHz;
-            }
-        }
-        ImGui::EndCombo();
-    }
-
-    int pairs = app.decoders.getConstellation(chan, app.constBuf, 1024);
-    if (pairs == 0 && app.dualMode)
-        pairs = app.decodersB.getConstellation(chan, app.constBuf, 1024);
-    ImGui::SameLine();
-    ImGui::TextDisabled("(%d pts)", pairs);
-
-    // Recompute the axis scale at most once per second so it holds steady
-    // instead of jittering as the constellation data changes every frame.
-    auto nowC = std::chrono::steady_clock::now();
-    if (std::chrono::duration<double>(nowC - app.constLimTime).count() >= 1.0)
-    {
-        float m = 0.5f;
-        for (float v : app.constBuf)
-            m = std::max(m, std::fabs(v));
-        app.constLim = m * 1.15;
-        app.constLimTime = nowC;
-    }
-    double lim = app.constLim;
-
-    if (ImPlot::BeginPlot("##const", ImVec2(-1, -1),
-                          ImPlotFlags_Equal | ImPlotFlags_NoLegend))
-    {
-        ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels,
-                          ImPlotAxisFlags_NoTickLabels);
-        ImPlot::SetupAxisLimits(ImAxis_X1, -lim, lim, ImGuiCond_Always);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, -lim, lim, ImGuiCond_Always);
-        if (pairs > 0)
-            ImPlot::PlotScatterG("IQ", constGetter, app.constBuf.data(), pairs);
-        ImPlot::EndPlot();
     }
 
     ImGui::End();
@@ -1488,12 +1331,11 @@ void drawDockHost(App& app)
         ImGui::DockBuilderAddNode(dockId, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(dockId, vp->WorkSize);
 
-        ImGuiID left, right, rtop, rrest, rmid, rbot, rcon, ctrl, dec;
+        ImGuiID left, right, rtop, rrest, rmid, rbot, ctrl, dec;
         ImGui::DockBuilderSplitNode(dockId, ImGuiDir_Left, 0.32f, &left, &right);
         ImGui::DockBuilderSplitNode(left, ImGuiDir_Up, 0.62f, &ctrl, &dec);
         ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, 0.30f, &rtop, &rrest);
         ImGui::DockBuilderSplitNode(rrest, ImGuiDir_Up, 0.58f, &rmid, &rbot);
-        ImGui::DockBuilderSplitNode(rbot, ImGuiDir_Right, 0.34f, &rcon, &rbot);
 
         ImGui::DockBuilderDockWindow((std::string(_L("Control")) + "###Control").c_str(), ctrl);
         ImGui::DockBuilderDockWindow((std::string(_L("Decoders")) + "###Decoders").c_str(), dec);
@@ -1511,8 +1353,7 @@ void drawDockHost(App& app)
             ImGui::DockBuilderDockWindow((std::string(_L("Spectrum (B)")) + "###Spectrum (B)").c_str(), rtopR);
             ImGui::DockBuilderDockWindow((std::string(_L("Waterfall (B)")) + "###Waterfall (B)").c_str(), rmidR);
         }
-        ImGui::DockBuilderDockWindow((std::string(_L("Pager")) + "###Pager").c_str(), rbot);
-        ImGui::DockBuilderDockWindow((std::string(_L("Constellation")) + "###Constellation").c_str(), rcon);
+        ImGui::DockBuilderDockWindow((std::string(_L("Messages")) + "###Messages").c_str(), rbot);
         ImGui::DockBuilderFinish(dockId);
     }
 

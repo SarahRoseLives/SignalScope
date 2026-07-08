@@ -44,7 +44,7 @@ void retunePreserving(App& app, double centerMHz)
 {
     std::vector<std::pair<double, int>> keep;
     for (auto& s : app.decoders.status())
-        keep.push_back({s.freqMHz, s.baud});
+        keep.push_back({s.freqMHz, s.typeId});
 
     double hz = centerMHz * 1e6;
     app.centerFreqMHz = centerMHz;
