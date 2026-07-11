@@ -1,5 +1,6 @@
 // OOB cable EPG decoder core — full SCTE 55-2 pipeline implementation.
 #include "decode/oob/oob_core.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include <zlib.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -745,7 +747,7 @@ std::vector<BiopObject> parseBiop(const std::vector<uint8_t>& blob)
                 obj.kind = "fil";
                 if (q + 4 > n) { pos++; continue; }
                 int clen = (blob[q]<<24)|(blob[q+1]<<16)|(blob[q+2]<<8)|blob[q+3]; q += 4;
-                if (clen > 0 && clen <= 200000 && q + clen <= n) {
+                if (clen > 0 && q + clen <= n) {
                     obj.content.assign(&blob[q], &blob[q + clen]);
                     q += clen;
                 }
@@ -856,6 +858,427 @@ extractEpg(const std::map<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>,
     services.assign(seen.begin(), seen.end());
 
     return {channels, services};
+}
+
+// ============================================================================
+// Zlib decompression
+// ============================================================================
+
+bool inflateZlib(const uint8_t* in, size_t inLen, std::vector<uint8_t>& out)
+{
+    if (!in || inLen < 2) return false;
+    // Quick check for zlib magic: 0x78 followed by 0x01/0x9C/0xDA/0x5E
+    if (in[0] != 0x78) return false;
+    if (in[1] != 0x01 && in[1] != 0x9C && in[1] != 0xDA && in[1] != 0x5E) return false;
+
+    z_stream strm = {};
+    strm.next_in = const_cast<Bytef*>(in);
+    strm.avail_in = (uInt)inLen;
+
+    if (inflateInit(&strm) != Z_OK) return false;
+
+    const size_t bufSize = 65536;
+    std::vector<uint8_t> buf(bufSize);
+    int ret;
+    do {
+        strm.next_out = buf.data();
+        strm.avail_out = (uInt)bufSize;
+        ret = inflate(&strm, Z_NO_FLUSH);
+        if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) {
+            inflateEnd(&strm);
+            return false;
+        }
+        size_t have = bufSize - strm.avail_out;
+        out.insert(out.end(), buf.data(), buf.data() + have);
+    } while (ret != Z_STREAM_END);
+
+    inflateEnd(&strm);
+    return true;
+}
+
+// Try raw deflate (no header/checksum) — common in MPEG/DVB
+bool inflateRaw(const uint8_t* in, size_t inLen, std::vector<uint8_t>& out)
+{
+    z_stream strm = {};
+    if (inflateInit2(&strm, -15) != Z_OK) return false; // -MAX_WBITS = raw deflate
+    strm.next_in = const_cast<Bytef*>(in);
+    strm.avail_in = (uInt)inLen;
+    const size_t bufSize = 65536;
+    std::vector<uint8_t> buf(bufSize);
+    int ret;
+    do {
+        strm.next_out = buf.data();
+        strm.avail_out = (uInt)bufSize;
+        ret = inflate(&strm, Z_NO_FLUSH);
+        if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) break;
+        size_t have = bufSize - strm.avail_out;
+        out.insert(out.end(), buf.data(), buf.data() + have);
+    } while (ret == Z_OK);
+    inflateEnd(&strm);
+    if (out.size() < 50) return false;
+    int printable = 0;
+    for (size_t i = 0; i < std::min(out.size(), size_t(500)); i++)
+        if (out[i] >= 0x20 && out[i] < 0x7F) printable++;
+    return printable > 50;
+}
+
+// ============================================================================
+// EPG text extraction from all modules
+// ============================================================================
+
+std::string extractEpgText(
+    const std::map<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>, std::vector<uint8_t>>& modules)
+{
+    std::string result;
+
+    // Concatenate all module blobs — BIOP objects may span module boundaries
+    std::vector<uint8_t> carouselBlob;
+    for (const auto& [key, blob] : modules)
+        carouselBlob.insert(carouselBlob.end(), blob.begin(), blob.end());
+    logWrite("OOB EPG text: concat blob=%zu bytes", carouselBlob.size());
+
+    // Parse BIOP from the concatenated carousel data
+    auto objs = parseBiop(carouselBlob);
+    logWrite("OOB EPG text: found %zu BIOP objects", objs.size());
+
+    // Also dump first 64 bytes of carousel blob for debugging
+    {
+        char hex[256] = {};
+        for (size_t i = 0; i < std::min(carouselBlob.size(), size_t(64)); i++)
+            snprintf(hex + i*2, 3, "%02X", carouselBlob[i]);
+        logWrite("OOB EPG hex: %s", hex);
+    }
+
+    for (const auto& obj : objs) {
+        char keyHex[32] = {};
+        for (size_t i = 0; i < std::min(obj.key.size(), size_t(15)); i++)
+            snprintf(keyHex + i*2, 3, "%02X", obj.key[i]);
+
+        logWrite("OOB EPG biop: kind=%s key=%s size=%zu first4=%02X%02X%02X%02X",
+                 obj.kind.c_str(), keyHex, obj.content.size(),
+                 obj.content.size() >= 4 ? obj.content[0] : 0,
+                 obj.content.size() >= 4 ? obj.content[1] : 0,
+                 obj.content.size() >= 4 ? obj.content[2] : 0,
+                 obj.content.size() >= 4 ? obj.content[3] : 0);
+
+        result += obj.kind + " key=" + std::string(keyHex);
+        result += " size=" + std::to_string(obj.content.size());
+        // Show first 80 chars of plaintext content
+        if (!obj.content.empty() && obj.kind == "fil") {
+            std::string preview;
+            for (size_t i = 0; i < std::min(obj.content.size(), size_t(80)); i++) {
+                unsigned char c = obj.content[i];
+                preview += (c >= 0x20 && c < 0x7F) ? (char)c : '.';
+            }
+            result += " [" + preview + "]";
+
+            // Try decompression: zlib first, then raw deflate
+            std::vector<uint8_t> d;
+            bool decompOk = false;
+            if (obj.content.size() >= 2 && obj.content[0] == 0x78)
+                decompOk = inflateZlib(obj.content.data(), obj.content.size(), d);
+            if (!decompOk && obj.content.size() > 4)
+                decompOk = inflateRaw(obj.content.data(), obj.content.size(), d);
+            if (decompOk) {
+                logWrite("OOB EPG decomp: key=%s %zuB -> %zuB", keyHex, obj.content.size(), d.size());
+                std::string text;
+                for (size_t i = 0; i < std::min(d.size(), size_t(3000)); i++) {
+                    unsigned char c = d[i];
+                    if (c >= 0x20 && c < 0x7F) text += (char)c;
+                    else if (c == '\n' || c == '\r' || c == '\t') text += ' ';
+                    else text += ' ';
+                }
+                result += "\n  ---\n";
+                int lines = 0;
+                size_t pos = 0;
+                while (pos < text.size() && lines < 30) {
+                    size_t end = text.find('\n', pos);
+                    if (end == std::string::npos) end = text.size();
+                    std::string line = text.substr(pos, end - pos);
+                    while (!line.empty() && line.front() == ' ') line.erase(0, 1);
+                    while (!line.empty() && line.back() == ' ') line.pop_back();
+                    if (!line.empty()) { result += "  " + line + "\n"; lines++; }
+                    pos = end + 1;
+                }
+                result += "  ---";
+            }
+        }
+        result += "\n";
+    }
+
+    // Scan entire carousel blob for zlib-compressed chunks (like Python inflate.py)
+    {
+        int zlibHits = 0;
+        for (size_t i = 0; i + 2 < carouselBlob.size(); i++) {
+            if (carouselBlob[i] == 0x78 &&
+                (carouselBlob[i+1] == 0x01 || carouselBlob[i+1] == 0x9C ||
+                 carouselBlob[i+1] == 0xDA || carouselBlob[i+1] == 0x5E)) {
+                std::vector<uint8_t> decompressed;
+                if (inflateZlib(&carouselBlob[i], carouselBlob.size() - i, decompressed)) {
+                    if (decompressed.size() > 50) {
+                        zlibHits++;
+                        logWrite("OOB EPG zlib hit @%zu: %zu bytes -> %zu decompressed", i,
+                                 carouselBlob.size() - i, decompressed.size());
+                        // Extract readable text
+                        std::string text;
+                        for (size_t j = 0; j < std::min(decompressed.size(), size_t(3000)); j++) {
+                            unsigned char c = decompressed[j];
+                            if (c >= 0x20 && c < 0x7F) text += (char)c;
+                            else if (c == '\n' || c == '\r' || c == '\t') text += ' ';
+                        }
+                        result += "\n[zlib @" + std::to_string(i) + " -> " + std::to_string(decompressed.size()) + "B]\n";
+                        int lines = 0;
+                        size_t pos = 0;
+                        while (pos < text.size() && lines < 40) {
+                            size_t end = text.find('\n', pos);
+                            if (end == std::string::npos) end = text.size();
+                            std::string line = text.substr(pos, end - pos);
+                            while (!line.empty() && line.front() == ' ') line.erase(0, 1);
+                            while (!line.empty() && line.back() == ' ') line.pop_back();
+                            if (!line.empty()) { result += "  " + line + "\n"; lines++; }
+                            pos = end + 1;
+                        }
+                        if (zlibHits >= 5) break; // limit to first 5 decompressed blobs
+                    }
+                } else {
+                    // inflate failed, try with smaller chunk
+                    std::vector<uint8_t> small;
+                    size_t chunkSize = std::min(size_t(131072), carouselBlob.size() - i);
+                    if (inflateZlib(&carouselBlob[i], chunkSize, small) && small.size() > 50) {
+                        zlibHits++;
+                        logWrite("OOB EPG zlib hit2 @%zu (chunk %zu): %zu bytes decompressed",
+                                 i, chunkSize, small.size());
+                    }
+                }
+            }
+        }
+        if (zlibHits > 0) logWrite("OOB EPG: %d zlib blobs decompressed", zlibHits);
+    }
+    return result;
+}
+
+// Scan raw concatenated cell payloads for zlib-compressed blobs (like inflate.py)
+std::string scanZlibForText(const std::vector<uint8_t>& payloadBlob)
+{
+    std::string result;
+    int zlibHits = 0;
+
+    for (size_t i = 0; i + 2 < payloadBlob.size(); i++) {
+        if (payloadBlob[i] == 0x78 &&
+            (payloadBlob[i+1] == 0x01 || payloadBlob[i+1] == 0x9C ||
+             payloadBlob[i+1] == 0xDA || payloadBlob[i+1] == 0x5E)) {
+            std::vector<uint8_t> decompressed;
+            size_t chunkSize = std::min(size_t(131072), payloadBlob.size() - i);
+                if (inflateZlib(&payloadBlob[i], chunkSize, decompressed) ||
+                    inflateRaw(&payloadBlob[i], chunkSize, decompressed)) {
+                if (decompressed.size() > 50) {
+                    zlibHits++;
+                    logWrite("OOB zlib: hit @%zu/%zu -> %zuB decompressed",
+                             i, payloadBlob.size(), decompressed.size());
+                    std::string text;
+                    for (size_t j = 0; j < std::min(decompressed.size(), size_t(3000)); j++) {
+                        unsigned char c = decompressed[j];
+                        if (c >= 0x20 && c < 0x7F) text += (char)c;
+                        else if (c == '\n' || c == '\r' || c == '\t') text += ' ';
+                        else text += ' ';
+                    }
+                    result += "\n[zlib @" + std::to_string(i) + " -> " +
+                              std::to_string(decompressed.size()) + "B]\n";
+                    int lines = 0;
+                    size_t pos = 0;
+                    while (pos < text.size() && lines < 40) {
+                        size_t end = text.find('\n', pos);
+                        if (end == std::string::npos) end = text.size();
+                        std::string line = text.substr(pos, end - pos);
+                        while (!line.empty() && line.front() == ' ') line.erase(0, 1);
+                        while (!line.empty() && line.back() == ' ') line.pop_back();
+                        if (!line.empty()) { result += "  " + line + "\n"; lines++; }
+                        pos = end + 1;
+                    }
+                    i += 4; // skip past the zlib marker
+                    if (zlibHits >= 10) break;
+                }
+            }
+        }
+    }
+    if (zlibHits > 0) logWrite("OOB EPG: %d zlib blobs in payload scan", zlibHits);
+    return result;
+}
+
+// ============================================================================
+// MAC control-channel decoder (VCI 0x0021)
+// ============================================================================
+
+static int macPayloadLen(const std::vector<uint8_t>& frame)
+{
+    if (frame.size() < 8) return 0;
+    size_t n = frame.size();
+    return ((int)frame[n - 6] << 8) | frame[n - 5];
+}
+
+std::string decodeMacMessages(const std::vector<std::vector<uint8_t>>& cells)
+{
+    const char* MSG_TYPES[] = {
+        nullptr, "Provisioning Channel", "Default Configuration",
+        "Sign-On Request", "Sign-On Response",
+        "Ranging and Power Calibration", "Ranging and Power Calibration Response",
+        "Initialization Complete",
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+        "Connect", "Connect Response", "Reservation Request", nullptr,
+        "Connect Confirm", "Release", nullptr, "Idle",
+        "Reservation Grant", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+        "Transmission Control", "Reprovision", "Link Management Response",
+    };
+
+    const int MAC_VPI = 0x00, MAC_VCI = 0x0021;
+    std::map<std::vector<uint8_t>, std::string> seen;
+    std::vector<uint8_t> cur;
+
+    for (const auto& cell : cells) {
+        auto h = parseAtmHeader(cell.data());
+        if (h.vpi != MAC_VPI || h.vci != MAC_VCI) continue;
+        if (!hecOk(cell.data())) continue;
+        cur.insert(cur.end(), &cell[ATM_HEADER_LEN], &cell[ATM_CELL_LEN]);
+        if (!(h.pt & 1)) continue; // wait for EOM
+
+        int L = macPayloadLen(cur);
+        if (L < 2 || L > (int)cur.size() - 8) { cur.clear(); continue; }
+
+        std::vector<uint8_t> body(&cur[0], &cur[L]);
+        cur.clear();
+        if (body.size() < 2 || seen.count(body)) continue;
+
+        int cfg = body[0];
+        int mt = body[1];
+        size_t off = 2;
+        std::string mac;
+        if ((cfg & 0x7) == 1 && body.size() >= 8) {
+            char buf[18];
+            snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     body[2], body[3], body[4], body[5], body[6], body[7]);
+            mac = buf;
+            off = 8;
+        }
+
+        std::string text;
+        const char* typeName = (mt >= 0 && mt < 64) ? MSG_TYPES[mt] : nullptr;
+        if (!typeName) {
+            char mbuf[32];
+            snprintf(mbuf, sizeof(mbuf), "Unknown(0x%02X)", mt);
+            typeName = mbuf;
+            // deduplicate — we need a persistent string for the map key->
+            // Actually, seen.insert does the dedup, and we use body as key.
+            // For display, we just format directly.
+        }
+
+        text += "MAC: ";
+        text += typeName;
+        if (!mac.empty()) text += " MAC=" + mac;
+        text += "\n";
+
+        // Parse IEs
+        if (mt == 0x01 && body.size() >= off + 6) {
+            bool freqIncluded = body[off] & 1;
+            if (freqIncluded) {
+                uint32_t freq = ((uint32_t)body[off+1]<<24) | ((uint32_t)body[off+2]<<16) |
+                                ((uint32_t)body[off+3]<<8) | body[off+4];
+                text += "  Provisioning: ";
+                if (freq > 1000000) text += std::to_string(freq / 1000000) + "." + std::to_string((freq/1000)%1000) + " MHz";
+                else text += std::to_string(freq) + " Hz";
+                text += " type=" + std::to_string(body[off+5]) + "\n";
+            }
+        } else if (mt == 0x02 && body.size() >= off + 20) {
+            uint32_t freq = ((uint32_t)body[off+1]<<24) | ((uint32_t)body[off+2]<<16) |
+                            ((uint32_t)body[off+3]<<8) | body[off+4];
+            text += "  Service Channel: ";
+            if (freq > 1000000) {
+                int mhz = (int)(freq / 1000000);
+                int khz = (int)((freq % 1000000) / 1000);
+                text += std::to_string(mhz) + "." + std::to_string(khz) + " MHz";
+            } else text += std::to_string(freq) + " Hz";
+            text += "\n";
+            uint32_t bfreq = ((uint32_t)body[off+6]<<24) | ((uint32_t)body[off+7]<<16) |
+                             ((uint32_t)body[off+8]<<8) | body[off+9];
+            text += "  Backup Freq: " + std::to_string(bfreq / 1000000) + "." +
+                    std::to_string((bfreq % 1000000) / 1000) + " MHz\n";
+            int frameLen = ((int)body[off+11]<<8) | body[off+12];
+            int lastSlot = (((int)body[off+13]<<8) | body[off+14]) & 0x1FFF;
+            const char* rates[] = {"256 kbps", "1.544 Mbps", "3.088 Mbps"};
+            int rateIdx = body[off+17] & 0x7;
+            text += "  Frame=" + std::to_string(frameLen) + " LastSlot=" + std::to_string(lastSlot) +
+                    " MaxPwr=" + std::to_string(body[off+15]) + " MinPwr=" + std::to_string(body[off+16]) +
+                    " Rate=" + (rateIdx < 3 ? rates[rateIdx] : "?") + "\n";
+        }
+
+        seen[body] = text;
+    }
+
+    std::string result;
+    for (const auto& [k, v] : seen) result += v;
+    return result;
+}
+
+// ============================================================================
+// OCAP host-config extractor (VCI 0x0FA2)
+// ============================================================================
+
+std::string decodeHostConfig(const std::vector<std::vector<uint8_t>>& cells)
+{
+    const int HOSTCONFIG_VCI = 0x0FA2;
+    std::vector<uint8_t> blob;
+    for (const auto& cell : cells) {
+        auto h = parseAtmHeader(cell.data());
+        if (h.vpi != 0x00 || h.vci != HOSTCONFIG_VCI) continue;
+        if (!hecOk(cell.data())) continue;
+        blob.insert(blob.end(), &cell[ATM_HEADER_LEN], &cell[ATM_CELL_LEN]);
+    }
+    if (blob.size() < 10) return {};
+
+    std::string text;
+    text += "Host Config (VCI 0x0FA2, " + std::to_string(blob.size()) + " bytes):\n";
+
+    // Extract ASCII key=value pairs
+    for (size_t i = 0; i + 3 < blob.size(); i++) {
+        // Look for key starting with a letter
+        if (!((blob[i] >= 'A' && blob[i] <= 'Z') || (blob[i] >= 'a' && blob[i] <= 'z'))) continue;
+        size_t keyStart = i, keyEnd = i;
+        while (keyEnd < blob.size() && ((blob[keyEnd] >= 'A' && blob[keyEnd] <= 'Z') ||
+               (blob[keyEnd] >= 'a' && blob[keyEnd] <= 'z') ||
+               (blob[keyEnd] >= '0' && blob[keyEnd] <= '9') ||
+               blob[keyEnd] == '.' || blob[keyEnd] == '-' || blob[keyEnd] == '_'))
+            keyEnd++;
+        if (keyEnd >= blob.size() || blob[keyEnd] != '=') continue;
+        size_t valStart = keyEnd + 1;
+        size_t valEnd = valStart;
+        while (valEnd < blob.size() && blob[valEnd] >= 0x20 && blob[valEnd] < 0x7F) valEnd++;
+        std::string key(blob.begin() + keyStart, blob.begin() + keyEnd);
+        std::string val(blob.begin() + valStart, blob.begin() + valEnd);
+        while (!val.empty() && val.back() == ' ') val.pop_back();
+        if (!val.empty())
+            text += "  " + key + " = " + val + "\n";
+        i = valEnd;
+    }
+
+    // Extract -D flags
+    for (size_t i = 0; i + 4 < blob.size(); i++) {
+        if (blob[i] == '-' && blob[i+1] == 'D') {
+            size_t eq = i + 2;
+            while (eq < blob.size() && blob[eq] != '=' && blob[eq] >= 0x20 && blob[eq] < 0x7F) eq++;
+            if (eq < blob.size() && blob[eq] == '=' && eq > i + 2) {
+                size_t vend = eq + 1;
+                while (vend < blob.size() && blob[vend] >= 0x20 && blob[vend] < 0x7F) vend++;
+                text += "  -D" + std::string(blob.begin() + i + 2, blob.begin() + eq) +
+                        " = " + std::string(blob.begin() + eq + 1, blob.begin() + vend) + "\n";
+                i = vend;
+            }
+        }
+    }
+
+    return text;
 }
 
 } // namespace oob

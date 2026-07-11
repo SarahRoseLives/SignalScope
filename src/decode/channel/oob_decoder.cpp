@@ -191,6 +191,10 @@ private:
                             snap.channels.push_back({ch.callsign, ch.channelNumber});
                     }
                     snap.serviceNames = std::move(serviceNames);
+
+                    // Extract full EPG text (BIOP files, decompressed guide data)
+                    snap.epgText = oob::extractEpgText(modules);
+                    logWrite("OOB: epgText -> %zu chars", snap.epgText.size());
                 }
             } else {
                 logWrite("OOB: skipping carousel — cells=%zu flow_present=%d",
@@ -227,6 +231,27 @@ private:
                     }
                 }
                 snap.readableStrings = std::move(readableStrings);
+
+                // Also build concatenated cell-payload blob for raw zlib scanning
+                if (carouselVpi >= 0) {
+                    std::vector<uint8_t> payloadBlob;
+                    for (const auto& cell : cells) {
+                        if (!oob::hecOk(cell.data())) continue;
+                        auto h = oob::parseAtmHeader(cell.data());
+                        if (h.vpi != carouselVpi || h.vci != carouselVci) continue;
+                        payloadBlob.insert(payloadBlob.end(), &cell[oob::ATM_HEADER_LEN],
+                                           &cell[oob::ATM_CELL_LEN]);
+                    }
+                    snap.epgText += oob::scanZlibForText(payloadBlob);
+                }
+
+                // Decode MAC control-channel messages (VCI 0x0021)
+                snap.macText = oob::decodeMacMessages(cells);
+                // Decode OCAP host config (VCI 0x0FA2)
+                snap.hostConfigText = oob::decodeHostConfig(cells);
+                if (!snap.macText.empty() || !snap.hostConfigText.empty())
+                    logWrite("OOB: mac=%zuB hostcfg=%zuB",
+                             snap.macText.size(), snap.hostConfigText.size());
             }
 
             logWrite("OOB: updating store — %zu ch, %zu svc, %zu strings",

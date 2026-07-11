@@ -37,15 +37,42 @@ Decoders are pluggable "channel" types placed on the spectrum:
 | AM      | AM audio (envelope detector) |
 | NFM     | Narrowband FM audio |
 | Pager   | POCSAG + FLEX, auto-detecting whichever is present |
+| OOB EPG | SCTE 55-2 cable out-of-band EPG: channel lineup (callsign → virtual channel #), service display names, MAC control-channel provisioning data (VCI 0x0021), OCAP/tru2way host configuration (VCI 0x0FA2), plus readable system strings from the DSM-CC object carousel |
 
 Decoded text lands in the unified **Messages** panel; audio modes play through
-the shared audio output. More decoder types are planned — see
+the shared audio output. The OOB EPG decoder has its own dedicated **EPG** tab
+with collapsible sections for channel lineup, service names, MAC control messages,
+host config, and raw system strings. More decoder types are planned — see
 [`docs/ADDING_A_DECODER.md`](docs/ADDING_A_DECODER.md) for the plugin interface.
 
 ### Planned
 
 - ADS-B (1090 MHz) and ERT/SCM utility meters — these are wideband, full-stream
   modes and will arrive as a separate decoder family.
+
+## OOB EPG Cable Decoder
+
+The SCTE 55-2 (DAVIC Mode B) out-of-band decoder processes the cable forward data
+channel (772 ksym/s QPSK, 1.544 Mb/s). It implements the full protocol stack:
+
+```
+IQ → QPSK Demod → Diff Decode → Derandomize → SL-ESF Frame Sync
+   → RS(55,53) FEC → ATM Cells → AAL5 → IP/UDP → DSM-CC Carousel
+   → EPG Extraction
+```
+
+**Extracted data types:**
+- **Channel Lineup** — callsign → virtual channel number (from DAVIC channel map, tag `0x0B`)
+- **Service Names** — friendly multi-word display names (e.g. "Paramount+ with SHOWTIME")
+- **MAC Control** — provisioning/service channel frequencies, upstream rates, power levels (VCI 0x0021)
+- **Host Config** — OCAP bootstrap: in-band QAM frequency/program, CVS/firmware URLs, `-D` flags (VCI 0x0FA2)
+- **System Strings** — firmware identifiers, CableCARD certs, filenames, UI messages extracted from ATM payloads
+- **BIOP Objects** — carousel file inventory (service gateway, configuration files, logo resources)
+
+> **Note:** Requires a cable TV provider that broadcasts SCTE 55-2 OOB forward data
+> (tested on Spectrum/Charter). Place the decoder at the OOB frequency (typically
+> 70–130 MHz). Use a sample rate ≥ 2 Msps for reliable decoding. The Airspy is
+> recommended for best sensitivity.
 
 ## Building
 
@@ -60,7 +87,9 @@ ninja -C build
 
 ## Credits
 
+- **CableSniffer** — OOB EPG protocol reverse-engineering (SCTE 55-2)
 - **multimon-ng** — Elias Oenal, Thomas Sailer (FLEX)
 - **Dear ImGui** / **ImPlot** — Omar Cornut, Evan Pezent
 - **miniaudio** — David Reid
+- **zlib** — Jean-loup Gailly, Mark Adler
 - Created by Sarah Rose

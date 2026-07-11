@@ -17,6 +17,9 @@ struct EpgSnapshot {
     std::vector<std::pair<std::string, int>> channels; // callsign -> channel#
     std::vector<std::string> serviceNames;
     std::vector<std::string> readableStrings; // ASCII strings from ATM payloads
+    std::string epgText; // decompressed EPG data (show names, times, descriptions)
+    std::string macText;  // MAC control-channel messages (VCI 0x0021)
+    std::string hostConfigText; // OCAP host configuration (VCI 0x0FA2)
     int totalSuperframes = 0;
     int totalCells = 0;
     int cleanCells = 0;
@@ -61,6 +64,17 @@ public:
             for (auto& s : d.readableStrings) rs.insert(s);
             data_.readableStrings.assign(rs.begin(), rs.end());
         }
+        // Merge EPG text: concatenate with separator
+        if (!d.epgText.empty()) {
+            if (!data_.epgText.empty()) data_.epgText += "\n";
+            data_.epgText += d.epgText;
+            if (data_.epgText.size() > 65536)
+                data_.epgText = data_.epgText.substr(data_.epgText.size() - 65536);
+        }
+        // MAC messages: only replace on successful decode
+        if (!d.macText.empty()) data_.macText = d.macText;
+        // Host config: only replace on successful decode
+        if (!d.hostConfigText.empty()) data_.hostConfigText = d.hostConfigText;
         // Stats and lock status always overwrite (latest run)
         data_.gotLock = d.gotLock;
         data_.lastUpdate = d.lastUpdate;
@@ -218,6 +232,15 @@ bool inflateZlib(const uint8_t* in, size_t inLen, std::vector<uint8_t>& out);
 // and return human-readable text (show names, descriptions, guide data).
 std::string extractEpgText(
     const std::map<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>, std::vector<uint8_t>>& modules);
+
+// Scan concatenated raw cell payloads for zlib-compressed blobs (like inflate.py)
+std::string scanZlibForText(const std::vector<uint8_t>& payloadBlob);
+
+// --- MAC control-channel decoder (VCI 0x0021) ---
+std::string decodeMacMessages(const std::vector<std::vector<uint8_t>>& cells);
+
+// --- OCAP host-config extractor (VCI 0x0FA2) ---
+std::string decodeHostConfig(const std::vector<std::vector<uint8_t>>& cells);
 
 // --- EPG extraction ---
 std::pair<std::vector<EpgEntry>, std::vector<std::string>>

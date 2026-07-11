@@ -1362,6 +1362,45 @@ void drawEpg(App& app)
         }
     }
 
+    // MAC Control Channel — VCI 0x0021 provisioning/config messages
+    if (ImGui::CollapsingHeader("MAC Control"))
+    {
+        ImGui::Text("%zu chars", snap.macText.size());
+        if (!snap.macText.empty()) {
+            if (ImGui::Button("Copy##mac"))
+                ImGui::SetClipboardText(snap.macText.c_str());
+        }
+        ImGui::BeginChild("##macdata", ImVec2(0, 0), false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        ImGui::TextUnformatted(snap.macText.c_str());
+        ImGui::EndChild();
+    }
+
+    // Host Config — OCAP bootstrap (VCI 0x0FA2)
+    if (ImGui::CollapsingHeader("Host Config"))
+    {
+        ImGui::Text("%zu chars", snap.hostConfigText.size());
+        if (!snap.hostConfigText.empty()) {
+            if (ImGui::Button("Copy##hostcfg"))
+                ImGui::SetClipboardText(snap.hostConfigText.c_str());
+        }
+        ImGui::BeginChild("##hostcfgdata", ImVec2(0, 0), false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        ImGui::TextUnformatted(snap.hostConfigText.c_str());
+        ImGui::EndChild();
+    }
+
+    // EPG Data — decompressed BIOP content (show names, times, descriptions)
+    if (ImGui::CollapsingHeader("EPG Data"))
+    {
+        ImGui::Text("%zu chars", snap.epgText.size());
+        if (!snap.epgText.empty()) {
+            if (ImGui::Button("Copy##epgdata"))
+                ImGui::SetClipboardText(snap.epgText.c_str());
+        }
+        ImGui::BeginChild("##epgdata", ImVec2(0, 0), false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        ImGui::TextUnformatted(snap.epgText.c_str());
+        ImGui::EndChild();
+    }
+
     // Readable Strings — always visible
     if (ImGui::CollapsingHeader("Readable Strings"))
     {
