@@ -48,7 +48,7 @@ private:
     std::atomic<double> progress_{0.0};
     SdrSampleCb cb_;
 
-    double centerFreq_ = 1545.0e6;
+    double centerFreq_ = 750.0e6;
     double sampleRate_ = 2.4e6;
 
     // Parsed WAV layout.

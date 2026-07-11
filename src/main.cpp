@@ -225,6 +225,7 @@ int main(int, char**)
         }
         drawDecoders(app);
         drawMessages(app);
+        drawEpg(app);
         drawAbout(app);
 
         int display_w, display_h;

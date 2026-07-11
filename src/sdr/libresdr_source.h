@@ -71,7 +71,7 @@ private:
     std::mutex  ctrlMutex_;      // serialize live control calls vs. streaming
     SdrSampleCb cb_;
 
-    double centerFreq_ = 1545.0e6;
+    double centerFreq_ = 750.0e6;
     double sampleRate_ = 4.0e6;
     double bandwidth_ = 0.0;     // 0 => track sample rate
     double gainDb_ = 40.0;       // <0 => AGC

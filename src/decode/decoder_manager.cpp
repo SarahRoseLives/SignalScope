@@ -189,7 +189,21 @@ int DecoderManager::addDecoderImpl(double freqHz, int typeId)
     }
 
     std::lock_guard<std::mutex> lk(best->dMtx);
-    auto sb = std::make_shared<SubBand>(Fs_, centerHz_, freqHz, kSubRateTarget, kSubBW);
+    // For dedicated (wideband) decoders, use the ddcRate/ddcBandwidth from the
+    // channel registry instead of the narrowband defaults.
+    double subRate = kSubRateTarget;
+    double subBw = kSubBW;
+    if (dedicated) {
+        const ChannelDecoderInfo* info = ChannelRegistry::instance().byType(typeId);
+        if (info) {
+            subRate = info->ddcRate;
+            subBw = info->ddcBandwidth;
+            // Clamp to the source rate (DDC can only downsample).
+            if (subRate > Fs_) subRate = Fs_;
+            if (subBw > subRate) subBw = subRate * 0.95;
+        }
+    }
+    auto sb = std::make_shared<SubBand>(Fs_, centerHz_, freqHz, subRate, subBw);
     auto dec = std::make_shared<Decoder>(
         sb->subRate, sb->centerHz, freqHz, typeId, id, &bus_, audioSink_);
     sb->decoders.emplace_back(std::move(dec));

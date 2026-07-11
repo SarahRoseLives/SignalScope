@@ -60,7 +60,7 @@ private:
     std::atomic<bool> running_{false};
     SdrSampleCb    cb_;
 
-    double centerFreq_ = 1545.0e6;
+    double centerFreq_ = 750.0e6;
     double sampleRate_ = 10.0e6;
     double ppm_ = 0.0;
 

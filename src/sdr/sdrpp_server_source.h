@@ -69,7 +69,7 @@ private:
     bool compression_ = true;
     int sampleType_ = 1; // int16
 
-    double centerFreq_ = 1545.0e6;
+    double centerFreq_ = 750.0e6;
     std::atomic<double> sampleRate_{2.0e6};
     double reqSampleRate_ = 0.0; // desired rate to request (0 = leave to server)
 

@@ -26,6 +26,7 @@ void drawSpectrum(App&, SpectrumView&, DecoderManager&, const char*, bool, bool)
 void drawWaterfall(App&, SpectrumView&, const char*);
 void drawDecoders(App&);
 void drawMessages(App&);
+void drawEpg(App&);
 void drawAbout(App&);
 
 // state/config.cpp

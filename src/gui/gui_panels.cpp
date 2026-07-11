@@ -9,6 +9,7 @@
 #include "decode/band_plan.h"
 #include "decode/channel/channel_registry.h"
 #include "decode/channel/message_bus.h"
+#include "decode/oob/oob_core.h"
 #include "i18n/i18n.h"
 #include "util/log.h"
 #include "version.h"
@@ -547,10 +548,9 @@ void drawControls(App& app)
             if (running)
                 app.libre.setCenterFreq(app.centerFreqMHz * 1e6);
         }
-        if (ImGui::InputDouble("Sample rate (MHz)", &app.libreSampleRateMHz, 0.5, 1.0, "%.3f"))
+        if (ImGui::Combo(_L("Sample rate (MHz)"), &app.libreSampleRateIdx, kLibreRateLabels, kLibreNumRates))
         {
-            if (app.libreSampleRateMHz < 0.2) app.libreSampleRateMHz = 0.2;
-            if (app.libreSampleRateMHz > 56.0) app.libreSampleRateMHz = 56.0;
+            app.libreSampleRateMHz = kLibreRates[app.libreSampleRateIdx];
             app.viewA.resetView = true;
             if (running)
                 app.libre.setSampleRate(app.libreSampleRateMHz * 1e6);
@@ -1260,6 +1260,129 @@ void drawMessages(App& app)
     ImGui::End();
 }
 
+void drawEpg(App& app)
+{
+    ImGui::Begin((std::string(_L("EPG")) + "###EPG").c_str());
+
+    auto snap = oob::EpgStore::instance().snapshot();
+
+    if (snap.gotLock)
+    {
+        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.35f, 1.0f), "LOCKED");
+        ImGui::SameLine();
+        ImGui::Text(" — %d SF, %d cells (clean:%d corr:%d fail:%d)",
+                    snap.totalSuperframes, snap.totalCells,
+                    snap.cleanCells, snap.correctedCells, snap.failedCells);
+        ImGui::Text("HEC pass: %d  fail: %d  |  Flow: VPI=%02X VCI=%04X  |  AAL5:%d  IP:%d  DSMCC:%d",
+                    snap.hecPass, snap.hecFail,
+                    snap.carouselVpi, snap.carouselVci,
+                    snap.aal5Frames, snap.ipPkts, snap.dsmccMods);
+        if (snap.lastUpdate > 0.0) {
+            double age = std::chrono::duration<double>(
+                std::chrono::system_clock::now().time_since_epoch()).count() - snap.lastUpdate;
+            ImGui::SameLine();
+            ImGui::TextDisabled("  %.0fs ago", age);
+        }
+    }
+    else
+    {
+        ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.2f, 1.0f), "WAITING FOR LOCK");
+    }
+
+    ImGui::Separator();
+
+    // Channel Lineup — always visible
+    if (ImGui::CollapsingHeader("Channel Lineup", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Text("%d channels", (int)snap.channels.size());
+        if (!snap.channels.empty()) {
+            if (ImGui::Button("Copy CSV##epg")) {
+                std::string csv;
+                for (const auto& ch : snap.channels)
+                    csv += ch.first + "," + std::to_string(ch.second) + "\n";
+                ImGui::SetClipboardText(csv.c_str());
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear##epgclr")) {
+                auto s = oob::EpgStore::instance().snapshot();
+                s.channels.clear();
+                oob::EpgStore::instance().update(std::move(s));
+            }
+        }
+        if (ImGui::BeginTable("##epgchan", 2,
+                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable))
+        {
+            ImGui::TableSetupColumn("Callsign", ImGuiTableColumnFlags_WidthFixed, 90);
+            ImGui::TableSetupColumn("Channel #");
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableHeadersRow();
+            if (snap.channels.empty()) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("—");
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("—");
+            }
+            for (const auto& ch : snap.channels)
+            {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(ch.first.c_str());
+                ImGui::TableNextColumn();
+                ImGui::Text("%d", ch.second);
+            }
+            ImGui::EndTable();
+        }
+    }
+
+    // Service Names — always visible
+    if (ImGui::CollapsingHeader("Service Names"))
+    {
+        ImGui::Text("%d names", (int)snap.serviceNames.size());
+        if (ImGui::BeginTable("##epgsvc", 1,
+                              ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                              ImGuiTableFlags_ScrollY))
+        {
+            ImGui::TableSetupColumn("Name");
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableHeadersRow();
+            if (snap.serviceNames.empty()) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("—");
+            }
+            for (const auto& s : snap.serviceNames)
+            {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(s.c_str());
+            }
+            ImGui::EndTable();
+        }
+    }
+
+    // Readable Strings — always visible
+    if (ImGui::CollapsingHeader("Readable Strings"))
+    {
+        ImGui::Text("%d unique strings", (int)snap.readableStrings.size());
+        if (!snap.readableStrings.empty()) {
+            if (ImGui::Button("Copy All##epgstr"))
+            {
+                std::string all;
+                for (const auto& s : snap.readableStrings) all += s + "\n";
+                ImGui::SetClipboardText(all.c_str());
+            }
+        }
+        ImGui::BeginChild("##epgstrlist", ImVec2(0, 0), false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        for (const auto& s : snap.readableStrings)
+            ImGui::TextUnformatted(s.c_str());
+        ImGui::EndChild();
+    }
+
+    ImGui::End();
+}
+
 void drawAbout(App& app)
 {
     if (!app.showAbout)
@@ -1276,14 +1399,9 @@ void drawAbout(App& app)
         ImGui::TextWrapped("SignalScope was created by Sarah Rose.");
         ImGui::Spacing();
         ImGui::TextWrapped("Built with components from:");
-        ImGui::TextDisabled("  JAERO (Jontio)");
-        ImGui::TextDisabled("  inmarsat-sniffer");
-        ImGui::TextDisabled("  scytaleC (Thierry Leconte)");
-        ImGui::TextDisabled("  DeDECTive (Sarah Rose)");
-        ImGui::Spacing();
-        ImGui::TextWrapped("Thanks to Arclamp VK4SUS for providing a server for accessing the satellite during development.");
-        ImGui::Spacing();
-        ImGui::TextWrapped("Thanks to Mike AA8IA for donating an Airspy R2 and Airspy Mini for development.");
+        ImGui::TextDisabled("  InmarScope (Sarah Rose)");
+        ImGui::TextDisabled("  multimon-ng");
+        ImGui::TextDisabled("  PDW (POCSAG/Flex)");
     }
     ImGui::End();
 }
@@ -1354,6 +1472,7 @@ void drawDockHost(App& app)
             ImGui::DockBuilderDockWindow((std::string(_L("Waterfall (B)")) + "###Waterfall (B)").c_str(), rmidR);
         }
         ImGui::DockBuilderDockWindow((std::string(_L("Messages")) + "###Messages").c_str(), rbot);
+        ImGui::DockBuilderDockWindow((std::string(_L("EPG")) + "###EPG").c_str(), rbot);
         ImGui::DockBuilderFinish(dockId);
     }
 

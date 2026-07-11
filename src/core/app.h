@@ -93,6 +93,7 @@ struct App
     // LibreSDR (USRP B210 clone, driven via UHD with our custom FPGA image)
 #ifdef HAS_LIBRESDR
     double libreSampleRateMHz = 4.0;
+    int    libreSampleRateIdx = 2; // index into kLibreRates (2 = 4 MSPS)
     float  libreGainDb = 40.0f;   // B210 RX gain 0..76 dB
     int    libreAntennaIdx = 1;   // 0=TRXA 1=RXA 2=TRXB 3=RXB (housing port labels)
     char   libreFpgaPath[512] = "libresdr_b210.bin";
@@ -107,7 +108,7 @@ struct App
     // Dual-SDR
     bool   dualMode = false;
     int    deviceIndexB = 1;
-    double centerFreqMHzB = 1545.0;
+    double centerFreqMHzB = 750.0;
     int    sampleRateIdxB = 2;  // 1.024 MHz (lower CPU in dual mode)
     bool   autoGainB = false;
     float  gainDbB = 40.0f;
@@ -141,7 +142,7 @@ struct App
     std::vector<SdrDeviceInfo> devices;
     int deviceIndex = 0;
 
-    double centerFreqMHz = 1545.0;
+    double centerFreqMHz = 750.0;
     int    sampleRateIdx = 9;
     bool   autoGain = false;
     float  gainDb = 40.0f;
@@ -209,9 +210,18 @@ constexpr double kAirspyRates[] = {2.5e6, 3.0e6, 6.0e6, 10.0e6};
 constexpr const char* kAirspyRateLabels[] = {"2.5", "3.0", "6.0", "10.0"};
 constexpr int kAirspyNumRates = (int)(sizeof(kAirspyRates) / sizeof(kAirspyRates[0]));
 
+// LibreSDR (B210) sample rates (MHz), 1..56 MSPS as a dropdown.
+constexpr double kLibreRates[] = {
+    1.0, 2.0, 4.0, 5.0, 8.0, 10.0, 12.0, 15.36,
+    16.0, 20.0, 25.0, 30.0, 40.0, 50.0, 56.0};
+constexpr const char* kLibreRateLabels[] = {
+    "1", "2", "4", "5", "8", "10", "12", "15.36",
+    "16", "20", "25", "30", "40", "50", "56"};
+constexpr int kLibreNumRates = (int)(sizeof(kLibreRates) / sizeof(kLibreRates[0]));
+
 constexpr int    kFftSizes[] = {1024, 2048, 4096, 8192, 16384, 32768, 65536};
 constexpr const char* kFftLabels[] = {"1024", "2048", "4096", "8192", "16384", "32768", "65536"};
 constexpr int kNumFftSizes = (int)(sizeof(kFftSizes) / sizeof(kFftSizes[0]));
 
 // Dock layout version: bump when the built-in default layout changes.
-constexpr int kLayoutVersion = 16;
+constexpr int kLayoutVersion = 17;
