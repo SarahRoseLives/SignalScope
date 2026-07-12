@@ -24,6 +24,7 @@ enum ChannelType
     kTypeNfm   = 3,
     kTypePager = 4,
     kTypeOobEpg = 5,
+    kTypeNrsc5 = 6,
 };
 
 struct ChannelDecoderInfo

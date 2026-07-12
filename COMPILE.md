@@ -54,6 +54,38 @@ pacman -S --needed mingw-w64-x86_64-libairspy
 Airspy headers are vendored in `third_party/airspy/`. The build automatically
 enables Airspy (`HAS_AIRSPY=1`) when libairspy is found by CMake.
 
+### Optional: HD Radio (NRSC-5) support
+
+SignalScope uses **libnrsc5** to decode HD Radio digital subcarriers on FM
+broadcast stations. The decoder shows station info, track metadata, and available
+audio programs. A vendored header is included in `third_party/nrsc5/`; the
+library must be built from source.
+
+Install build dependencies (FFTW, libao):
+
+```bash
+pacman -S --needed \
+  mingw-w64-x86_64-fftw \
+  mingw-w64-x86_64-libao
+```
+
+Build and install libnrsc5:
+
+```bash
+git clone --depth 1 https://github.com/theori-io/nrsc5.git /tmp/nrsc5
+cd /tmp/nrsc5
+cmake -S . -B build -G Ninja
+ninja -C build
+cp build/src/libnrsc5.dll.a /mingw64/lib/
+cp build/src/libnrsc5.dll /mingw64/bin/
+```
+
+The build enables NRSC-5 (`HAS_NRSC5=1`) automatically when CMake finds `libnrsc5`
+(`-- libnrsc5 link library found: ...`). Two runtime DLLs are needed next to the
+exe: `libnrsc5.dll` (copied automatically by the post-build step) and
+`libfftw3f-3.dll` (from `mingw-w64-x86_64-fftw`; copy it manually or install the
+package).
+
 ### Optional: LibreSDR / USRP B210 support
 
 SignalScope drives the LibreSDR (a USRP B210 clone) through **UHD**, which loads

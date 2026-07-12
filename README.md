@@ -37,12 +37,15 @@ Decoders are pluggable "channel" types placed on the spectrum:
 | AM      | AM audio (envelope detector) |
 | NFM     | Narrowband FM audio |
 | Pager   | POCSAG + FLEX, auto-detecting whichever is present |
+| HD Radio | NRSC-5 digital FM: station info, track metadata (ID3), multi-program audio, BER/MER signal quality, station location |
 | OOB EPG | SCTE 55-2 cable out-of-band EPG: channel lineup (callsign → virtual channel #), service display names, MAC control-channel provisioning data (VCI 0x0021), OCAP/tru2way host configuration (VCI 0x0FA2), plus readable system strings from the DSM-CC object carousel |
 
-Decoded text lands in the unified **Messages** panel; audio modes play through
+Decoded text lands in the unified **Pager** panel; audio modes play through
 the shared audio output. The OOB EPG decoder has its own dedicated **EPG** tab
 with collapsible sections for channel lineup, service names, MAC control messages,
-host config, and raw system strings. More decoder types are planned — see
+host config, and raw system strings. The HD Radio decoder has a dedicated **HD Radio**
+tab showing station info, now-playing track, program selector, signal quality,
+and technical details. More decoder types are planned — see
 [`docs/ADDING_A_DECODER.md`](docs/ADDING_A_DECODER.md) for the plugin interface.
 
 ### Planned
@@ -73,6 +76,27 @@ IQ → QPSK Demod → Diff Decode → Derandomize → SL-ESF Frame Sync
 > (tested on Spectrum/Charter). Place the decoder at the OOB frequency (typically
 > 70–130 MHz). Use a sample rate ≥ 2 Msps for reliable decoding. The Airspy is
 > recommended for best sensitivity.
+
+## HD Radio (NRSC-5) Decoder
+
+Decodes HD Radio digital subcarriers on FM broadcast stations via **libnrsc5**.
+Place the decoder at the center frequency of any FM station (88–108 MHz) with
+digital HD Radio sidebands.
+
+**Features:**
+- Multi-program audio with program selector
+- Station info: call sign, slogan, facility ID, transmitter location
+- Now Playing track metadata (title, artist, album, genre) via ID3
+- Signal quality: MER (modulation error ratio), BER (bit error rate)
+- Codec details (HE-AAC mode, blend control, gain, latency)
+- Program type per channel (Rock, News, Jazz, etc.)
+- Local time with DST info from the station
+- Emergency alerts
+
+**Build requirement:** See [`COMPILE.md`](COMPILE.md) for libnrsc5 build instructions.
+The library must be built from source with FAAD2 (AAC audio codec) enabled.
+Requires a sample rate ≥ 6 Msps for reliable digital lock — the Airspy or HackRF
+is recommended.
 
 ## Building
 

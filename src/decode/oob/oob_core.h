@@ -242,6 +242,42 @@ std::string decodeMacMessages(const std::vector<std::vector<uint8_t>>& cells);
 // --- OCAP host-config extractor (VCI 0x0FA2) ---
 std::string decodeHostConfig(const std::vector<std::vector<uint8_t>>& cells);
 
+// --- NRSC-5 HD Radio store (thread-safe singleton) ---
+#ifdef HAS_NRSC5
+
+struct Nrsc5Info {
+    std::string stationName;
+    std::string stationSlogan;
+    std::string stationMessage;
+    std::string stationLocation; // lat, lon, alt
+    std::string stationId;       // country, facility ID
+    std::string trackTitle;
+    std::string trackArtist;
+    std::string trackAlbum;
+    std::string trackGenre;
+    std::string programType;     // program type name for current program
+    std::string codecInfo;       // codec mode, blend, gain, latency
+    std::string localTime;       // local time string
+    float merLower = 0;
+    float merUpper = 0;
+    float ber = 0;
+    bool sync = false;
+    int activeProgram = 0;
+    std::vector<std::string> programs;
+};
+
+class Nrsc5Store {
+public:
+    static Nrsc5Store& instance() { static Nrsc5Store s; return s; }
+    void update(const Nrsc5Info& d) { std::lock_guard<std::mutex> lk(mtx_); data_ = d; }
+    void setProgram(int p) { std::lock_guard<std::mutex> lk(mtx_); data_.activeProgram = p; }
+    Nrsc5Info snapshot() { std::lock_guard<std::mutex> lk(mtx_); return data_; }
+private:
+    mutable std::mutex mtx_;
+    Nrsc5Info data_;
+};
+#endif
+
 // --- EPG extraction ---
 std::pair<std::vector<EpgEntry>, std::vector<std::string>>
 extractEpg(const std::map<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>, std::vector<uint8_t>>& modules);

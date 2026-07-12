@@ -27,6 +27,7 @@ void drawWaterfall(App&, SpectrumView&, const char*);
 void drawDecoders(App&);
 void drawMessages(App&);
 void drawEpg(App&);
+void drawHdRadio(App&);
 void drawAbout(App&);
 
 // state/config.cpp

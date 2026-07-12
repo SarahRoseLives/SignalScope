@@ -1195,7 +1195,7 @@ void drawDecoders(App& app)
 // Generic decoded-messages panel, fed by every decoder via the MessageBus.
 void drawMessages(App& app)
 {
-    ImGui::Begin((std::string(_L("Messages")) + "###Messages").c_str());
+    ImGui::Begin((std::string(_L("Pager")) + "###Messages").c_str());
 
     unsigned long long total = app.decoders.bus().count();
     if (app.dualMode) total += app.decodersB.bus().count();
@@ -1422,6 +1422,71 @@ void drawEpg(App& app)
     ImGui::End();
 }
 
+void drawHdRadio(App& app)
+{
+#ifdef HAS_NRSC5
+    ImGui::Begin((std::string(_L("HD Radio")) + "###HDRadio").c_str());
+
+    auto info = oob::Nrsc5Store::instance().snapshot();
+
+    ImVec4 syncCol = info.sync ? ImVec4(0.2f, 1.0f, 0.35f, 1.0f)
+                               : ImVec4(0.9f, 0.7f, 0.2f, 1.0f);
+    ImGui::TextColored(syncCol, "%s", info.sync ? "LOCKED" : "NO SYNC");
+    ImGui::SameLine();
+    ImGui::Text("  MER L %.1f U %.1f dB  BER %.4f", info.merLower, info.merUpper, info.ber);
+
+    if (!info.stationName.empty()) {
+        ImGui::Separator();
+        ImGui::TextUnformatted(info.stationName.c_str());
+    }
+    if (!info.stationId.empty()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("  [%s]", info.stationId.c_str());
+    }
+    if (!info.stationSlogan.empty()) {
+        ImGui::TextDisabled("%s", info.stationSlogan.c_str());
+    }
+    if (!info.stationMessage.empty()) {
+        ImGui::TextWrapped("%s", info.stationMessage.c_str());
+    }
+    if (!info.stationLocation.empty()) {
+        ImGui::TextDisabled("Location: %s", info.stationLocation.c_str());
+    }
+
+    if (!info.trackTitle.empty()) {
+        ImGui::Separator();
+        ImGui::Text("Now Playing:");
+        ImGui::TextUnformatted(info.trackTitle.c_str());
+        if (!info.trackArtist.empty()) ImGui::TextDisabled("  %s", info.trackArtist.c_str());
+        if (!info.trackAlbum.empty()) ImGui::TextDisabled("  [%s]", info.trackAlbum.c_str());
+        if (!info.trackGenre.empty()) ImGui::TextDisabled("  genre: %s", info.trackGenre.c_str());
+        if (!info.programType.empty()) ImGui::TextDisabled("  type: %s", info.programType.c_str());
+    }
+
+    if (!info.programs.empty()) {
+        ImGui::Separator();
+        ImGui::Text("Programs (%d):", (int)info.programs.size());
+        if (ImGui::BeginCombo("##hdprog", info.programs[info.activeProgram].c_str())) {
+            for (int i = 0; i < (int)info.programs.size(); i++) {
+                if (ImGui::Selectable(info.programs[i].c_str(), i == info.activeProgram)) {
+                    oob::Nrsc5Store::instance().setProgram(i);
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+
+    if (!info.codecInfo.empty()) {
+        ImGui::TextDisabled("Codec: %s", info.codecInfo.c_str());
+    }
+    if (!info.localTime.empty()) {
+        ImGui::TextDisabled("Time: %s", info.localTime.c_str());
+    }
+
+    ImGui::End();
+#endif
+}
+
 void drawAbout(App& app)
 {
     if (!app.showAbout)
@@ -1510,8 +1575,9 @@ void drawDockHost(App& app)
             ImGui::DockBuilderDockWindow((std::string(_L("Spectrum (B)")) + "###Spectrum (B)").c_str(), rtopR);
             ImGui::DockBuilderDockWindow((std::string(_L("Waterfall (B)")) + "###Waterfall (B)").c_str(), rmidR);
         }
-        ImGui::DockBuilderDockWindow((std::string(_L("Messages")) + "###Messages").c_str(), rbot);
+        ImGui::DockBuilderDockWindow((std::string(_L("Pager")) + "###Messages").c_str(), rbot);
         ImGui::DockBuilderDockWindow((std::string(_L("EPG")) + "###EPG").c_str(), rbot);
+        ImGui::DockBuilderDockWindow((std::string(_L("HD Radio")) + "###HDRadio").c_str(), rbot);
         ImGui::DockBuilderFinish(dockId);
     }
 
