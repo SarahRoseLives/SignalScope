@@ -32,6 +32,7 @@ struct ChannelDecoderInfo
     int         typeId = 0;          // stable id, persisted in config
     std::string name;                // combo label, e.g. "WFM (broadcast audio)"
     std::string shortLabel;          // table label, e.g. "WFM"
+    std::string category;            // group label, e.g. "Audio", "Digital"
     double      ddcRate = 48000.0;   // per-channel DDC output rate (Hz)
     double      ddcBandwidth = 12500.0; // DDC passband (double-sided, Hz)
     int         weight = 3;          // CPU load weight for worker balancing

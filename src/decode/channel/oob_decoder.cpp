@@ -279,6 +279,7 @@ private:
 REGISTER_CHANNEL_DECODER(ChannelDecoderInfo{
     5, // kTypeOobEpg
     "OOB EPG (cable TV)", "OOB-EPG",
+    "Digital",
     /*ddcRate*/ 2000000.0, /*ddcBandwidth*/ 1000000.0, /*weight*/ 8,
     /*isAudio*/ false, /*dedicatedSubband*/ true,
     [](const ChannelContext& c) { return std::make_unique<OobChannel>(c); }});

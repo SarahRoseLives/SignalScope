@@ -73,18 +73,21 @@ private:
 
 REGISTER_CHANNEL_DECODER(ChannelDecoderInfo{
     kTypeWfm, "WFM (broadcast audio)", "WFM",
+    "Audio",
     /*ddcRate*/ 240000.0, /*ddcBandwidth*/ 200000.0, /*weight*/ 3,
     /*isAudio*/ true, /*dedicatedSubband*/ true,
     [](const ChannelContext& c) { return std::make_unique<WfmChannel>(c); }});
 
 REGISTER_CHANNEL_DECODER(ChannelDecoderInfo{
     kTypeAm, "AM (audio)", "AM",
+    "Audio",
     /*ddcRate*/ 48000.0, /*ddcBandwidth*/ 10000.0, /*weight*/ 2,
     /*isAudio*/ true, /*dedicatedSubband*/ false,
     [](const ChannelContext& c) { return std::make_unique<AmNfmChannel>(c, AmNfmDemod::AM); }});
 
 REGISTER_CHANNEL_DECODER(ChannelDecoderInfo{
     kTypeNfm, "NFM (audio)", "NFM",
+    "Audio",
     /*ddcRate*/ 48000.0, /*ddcBandwidth*/ 12500.0, /*weight*/ 2,
     /*isAudio*/ true, /*dedicatedSubband*/ false,
     [](const ChannelContext& c) { return std::make_unique<AmNfmChannel>(c, AmNfmDemod::NFM); }});

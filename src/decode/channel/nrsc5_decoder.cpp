@@ -195,16 +195,6 @@ private:
             if (evt->id3.artist) { trackArtist_ = evt->id3.artist; changed = true; }
             if (evt->id3.album)  { trackAlbum_  = evt->id3.album;  changed = true; }
             if (evt->id3.genre)  { trackGenre_  = evt->id3.genre;  changed = true; }
-            if (bus_ && !trackTitle_.empty()) {
-                DecodedRecord r;
-                r.timeSec = nowSec();
-                r.channelId = channelId_;
-                r.freqMHz = freqMHz_;
-                r.source = "HD-Radio";
-                r.text = trackTitle_;
-                if (!trackArtist_.empty()) r.text += " - " + trackArtist_;
-                bus_->post(r);
-            }
             break;
         case NRSC5_EVENT_SIG:
             programs_.clear();
@@ -298,6 +288,7 @@ private:
 REGISTER_CHANNEL_DECODER(ChannelDecoderInfo{
     kTypeNrsc5,
     "HD Radio (NRSC-5)", "HD",
+    "Digital",
     /*ddcRate*/ 1488375.0, /*ddcBandwidth*/ 500000.0, /*weight*/ 10,
     /*isAudio*/ true, /*dedicatedSubband*/ true,
     [](const ChannelContext& c) { return std::make_unique<Nrsc5Channel>(c); }});
@@ -307,6 +298,7 @@ REGISTER_CHANNEL_DECODER(ChannelDecoderInfo{
 REGISTER_CHANNEL_DECODER(ChannelDecoderInfo{
     kTypeNrsc5,
     "HD Radio (NRSC-5)", "HD",
+    "Digital",
     /*ddcRate*/ 48000.0, /*ddcBandwidth*/ 12500.0, /*weight*/ 0,
     /*isAudio*/ false, /*dedicatedSubband*/ false,
     [](const ChannelContext&) { return nullptr; }});

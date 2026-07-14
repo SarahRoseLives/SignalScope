@@ -214,6 +214,7 @@ private:
 
 REGISTER_CHANNEL_DECODER(ChannelDecoderInfo{
     kTypePager, "Pager (POCSAG/FLEX auto)", "Pager",
+    "Paging / Data",
     /*ddcRate*/ 48000.0, /*ddcBandwidth*/ 25000.0, /*weight*/ 3,
     /*isAudio*/ false, /*dedicatedSubband*/ false,
     [](const ChannelContext& c) { return std::make_unique<PagerChannel>(c); }});

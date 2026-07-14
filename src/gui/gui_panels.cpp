@@ -717,17 +717,37 @@ void drawControls(App& app)
     ImGui::Separator();
     {
         const auto& reg = ChannelRegistry::instance().all();
-        std::vector<const char*> names;
-        names.reserve(reg.size());
-        for (const auto& info : reg)
-            names.push_back(info.name.c_str());
-        if (app.newTypeIdx < 0 || app.newTypeIdx >= (int)names.size())
+        if (app.newTypeIdx < 0 || app.newTypeIdx >= (int)reg.size())
             app.newTypeIdx = 0;
         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.10f, 0.18f, 0.42f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.15f, 0.28f, 0.60f, 1.0f));
         ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.12f, 0.22f, 0.50f, 1.0f));
-        if (!names.empty())
-            ImGui::Combo(_L("Decode type"), &app.newTypeIdx, names.data(), (int)names.size());
+
+        const char* curLabel = (app.newTypeIdx < (int)reg.size()) ? reg[app.newTypeIdx].name.c_str() : "";
+        if (ImGui::BeginCombo(_L("Decode type"), curLabel))
+        {
+            std::string lastCat;
+            for (int i = 0; i < (int)reg.size(); i++)
+            {
+                // Insert category header if it changed
+                if (!reg[i].category.empty() && reg[i].category != lastCat)
+                {
+                    lastCat = reg[i].category;
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.6f, 0.8f, 1.0f));
+                    ImGui::TextDisabled("%s", lastCat.c_str());
+                    ImGui::PopStyleColor();
+                    ImGui::Separator();
+                }
+                // Indented decoder entry
+                char label[128];
+                snprintf(label, sizeof(label), "    %s", reg[i].name.c_str());
+                if (ImGui::Selectable(label, i == app.newTypeIdx))
+                    app.newTypeIdx = i;
+                if (i == app.newTypeIdx)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
         ImGui::PopStyleColor(3);
     }
     ImGui::TextDisabled("Ctrl+click the spectrum to add a decoder there");
@@ -1239,6 +1259,9 @@ void drawMessages(App& app)
 
         for (auto it = msgs.begin(); it != msgs.end(); ++it)
         {
+            // Only show pager messages (POCSAG / FLEX) in this panel
+            if (it->source != "POCSAG" && it->source != "FLEX")
+                continue;
             if (hasSearch)
             {
                 std::string hay = it->text + "|" + it->source;
@@ -1595,6 +1618,20 @@ void drawDockHost(App& app)
                 app.showAbout = true;
             ImGui::EndMenu();
         }
+        // Patreon button on the right side of the menu bar
+        float avail = ImGui::GetContentRegionAvail().x;
+        float btnW = ImGui::CalcTextSize("Support on Patreon").x + 20;
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + avail - btnW - 4);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.42f, 0.15f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.50f, 0.20f, 1.0f));
+        if (ImGui::SmallButton("Support on Patreon"))
+        {
+#if defined(_WIN32)
+            ShellExecuteA(nullptr, "open", "https://www.patreon.com/c/SarahRoseLives",
+                          nullptr, nullptr, SW_SHOWNORMAL);
+#endif
+        }
+        ImGui::PopStyleColor(2);
         ImGui::EndMenuBar();
     }
 
