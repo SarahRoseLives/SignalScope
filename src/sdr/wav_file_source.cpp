@@ -2,9 +2,11 @@
 
 #include "util/log.h"
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -17,6 +19,12 @@ uint32_t rd32(const unsigned char* p)
 uint16_t rd16(const unsigned char* p)
 {
     return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+uint64_t rd64(const unsigned char* p)
+{
+    return (uint64_t)p[0] | ((uint64_t)p[1] << 8) | ((uint64_t)p[2] << 16) |
+           ((uint64_t)p[3] << 24) | ((uint64_t)p[4] << 32) | ((uint64_t)p[5] << 40) |
+           ((uint64_t)p[6] << 48) | ((uint64_t)p[7] << 56);
 }
 
 } // namespace
@@ -47,15 +55,14 @@ bool WavFileSource::start(int, SdrSampleCb cb, std::string& err)
     }
 
     bool haveFmt = false, haveData = false;
-    while (f && !(haveFmt && haveData))
+    wavCenterFreq_ = 0.0;
+    while (f)
     {
         unsigned char ch[8];
         f.read((char*)ch, 8);
         if (!f)
             break;
-        uint32_t id = rd32(ch);
         uint32_t sz = rd32(ch + 4);
-        (void)id;
 
         if (std::memcmp(ch, "fmt ", 4) == 0)
         {
@@ -68,18 +75,51 @@ bool WavFileSource::start(int, SdrSampleCb cb, std::string& err)
                 bits_ = rd16(fmt.data() + 14);
             }
             haveFmt = true;
-            if (sz & 1) f.seekg(1, std::ios::cur); // word alignment
+            if (sz & 1) f.seekg(1, std::ios::cur);
         }
         else if (std::memcmp(ch, "data", 4) == 0)
         {
             dataOffset_ = (uint64_t)f.tellg();
             dataBytes_ = sz;
             haveData = true;
-            // don't read the data here
+            break;
+        }
+        else if (std::memcmp(ch, "auxi", 4) == 0 && sz >= 16)
+        {
+            std::vector<unsigned char> aux(std::min<uint32_t>(sz, 128u));
+            f.read((char*)aux.data(), aux.size());
+            wavCenterFreq_ = (double)rd64(aux.data() + 8);
+            if (sz > aux.size())
+                f.seekg(sz - aux.size(), std::ios::cur);
+            if (sz & 1) f.seekg(1, std::ios::cur);
         }
         else
         {
             f.seekg(sz + (sz & 1), std::ios::cur);
+        }
+    }
+
+    // If auxi didn't provide center freq, extract from filename (SDR++ convention)
+    if (wavCenterFreq_ == 0.0)
+    {
+        std::string name = path_;
+        auto pos = name.rfind('\\');
+        if (pos == std::string::npos) pos = name.rfind('/');
+        if (pos != std::string::npos) name = name.substr(pos + 1);
+        for (size_t i = 0; i + 1 < name.size(); ++i)
+        {
+            if (std::tolower((unsigned char)name[i]) != 'h' ||
+                std::tolower((unsigned char)name[i + 1]) != 'z')
+                continue;
+            size_t j = i;
+            while (j > 0 && name[j - 1] >= '0' && name[j - 1] <= '9')
+                --j;
+            std::string digits = name.substr(j, i - j);
+            if (!digits.empty())
+            {
+                wavCenterFreq_ = std::stod(digits);
+                break;
+            }
         }
     }
 
@@ -97,8 +137,6 @@ bool WavFileSource::start(int, SdrSampleCb cb, std::string& err)
     logWrite("[wav] opened %dch %d-bit %g Hz",
              channels_, bits_, sampleRate_);
 
-    // SDR captures often exceed 4 GB, where the 32-bit data-chunk size field
-    // is truncated/bogus. Use the actual remaining file length instead.
     f.clear();
     f.seekg(0, std::ios::end);
     uint64_t fileSize = (uint64_t)f.tellg();
@@ -108,6 +146,13 @@ bool WavFileSource::start(int, SdrSampleCb cb, std::string& err)
         if (dataBytes_ == 0 || dataBytes_ > physical)
             dataBytes_ = physical;
     }
+
+    const int frameBytes = channels_ * (bits_ / 8);
+    totalFrames_ = dataBytes_ / (uint64_t)frameBytes;
+
+    seekPending_.store(false);
+    seekTarget_.store(0);
+    currentFrame_.store(0);
 
     cb_ = std::move(cb);
     progress_.store(0.0);
@@ -124,6 +169,14 @@ void WavFileSource::stop()
     cb_ = nullptr;
 }
 
+void WavFileSource::seekToFrame(uint64_t frame)
+{
+    if (frame >= totalFrames_)
+        frame = totalFrames_ > 0 ? totalFrames_ - 1 : 0;
+    seekTarget_.store(frame);
+    seekPending_.store(true);
+}
+
 void WavFileSource::playLoop()
 {
     std::ifstream f(path_, std::ios::binary);
@@ -134,7 +187,6 @@ void WavFileSource::playLoop()
     }
 
     const int frameBytes = channels_ * (bits_ / 8);
-    const uint64_t totalFrames = dataBytes_ / (uint64_t)frameBytes;
     const int kFrames = 32768;
 
     std::vector<unsigned char> raw((size_t)kFrames * frameBytes);
@@ -149,7 +201,22 @@ void WavFileSource::playLoop()
 
     while (running_.load())
     {
-        uint64_t remaining = totalFrames - framePos;
+        if (seekPending_.load())
+        {
+            seekPending_.store(false);
+            uint64_t target = seekTarget_.load();
+            f.clear();
+            f.seekg((std::streamoff)(dataOffset_ + target * frameBytes), std::ios::beg);
+            framePos = target;
+            t0 = clock::now();
+            played = 0;
+            currentFrame_.store(target);
+            progress_.store(totalFrames_ ? (double)target / (double)totalFrames_ : 0.0);
+            if (onSeek_)
+                onSeek_();
+        }
+
+        uint64_t remaining = totalFrames_ - framePos;
         if (remaining == 0)
         {
             if (loop_.load())
@@ -196,10 +263,9 @@ void WavFileSource::playLoop()
 
         framePos += frames;
         played += frames;
-        progress_.store(totalFrames ? (double)framePos / (double)totalFrames : 0.0);
+        currentFrame_.store(framePos);
+        progress_.store(totalFrames_ ? (double)framePos / (double)totalFrames_ : 0.0);
 
-        // Pace to real time so the ring isn't overrun and the waterfall
-        // scrolls at the capture's true rate.
         auto target = t0 + std::chrono::duration_cast<clock::duration>(
                                std::chrono::duration<double>((double)played / sampleRate_));
         std::this_thread::sleep_until(target);

@@ -1,11 +1,15 @@
 // IQ recorder: writes live IQ samples to a WAV file in 8-bit stereo format.
 // Includes an optional pre-buffer ring that captures the last N seconds of IQ
 // so recording always gets the moments just before the user hit Record.
+// Also supports VFO-based band-slice recording via DDC.
 #pragma once
+
+#include "dsp/ddc.h"
 
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -19,33 +23,31 @@ public:
     IqRecorder(const IqRecorder&) = delete;
     IqRecorder& operator=(const IqRecorder&) = delete;
 
-    // Size the pre-buffer ring for bufferSec at sampleRate Hz.  Call whenever
-    // the sample rate changes or the user tweaks the buffer duration.  If
-    // bufferSec <= 0 or sampleRate > 3e6 the ring is freed entirely.
     void configurePrebuffer(double sampleRate, double bufferSec);
-
-    // Feed the pre-buffer ring (call from the SDR callback on every IQ block
-    // regardless of whether recording is active).  No-op when the ring is
-    // disabled (sample rate > 3 Msps).
     void prebuffer(const float* iq, int nComplex);
 
-    // Start recording.  sampleRate is the IQ sample rate (Hz).  If the
-    // pre-buffer ring holds data it is drained into the file first.
+    // Full-bandwidth recording
     bool start(const std::string& path, double sampleRate);
-
-    // Append nComplex interleaved I,Q float samples (2n floats).
     void write(const float* iq, int nComplex);
 
-    // Finalize header and close.
+    // DDC-sliced sub-band recording
+    bool startSelection(const std::string& path, double sampleRate,
+                        double centerHz, double loHz, double hiHz);
+    void writeSelection(const float* iq, int nComplex);
+    void stopSelection();
+
     void stop();
 
     bool isRecording() const { return recording_.load(); }
-    double elapsed() const; // seconds since start
+    bool isRecordingSelection() const { return selRecording_.load(); }
+    double elapsed() const;
     const std::string& path() const { return path_; }
 
-    // Exposed for the UI memory-duty estimate.
     double prebufferSec() const { return bufferSec_; }
     size_t prebufferBytes() const { return ring_.capacity() * sizeof(float); }
+
+    double selSampleRate() const { return ddc_ ? ddc_->outputRate() : 0.0; }
+    double selElapsed() const;
 
 private:
     std::atomic<bool> recording_{false};
@@ -55,10 +57,16 @@ private:
     double startTime_ = 0.0;
     uint32_t dataBytes_ = 0;
 
-    // Pre-buffer ring (float interleaved I,Q).
+    // Selection (DDC slice) recording
+    std::atomic<bool> selRecording_{false};
+    std::FILE* selF_ = nullptr;
+    double selStartTime_ = 0.0;
+    uint32_t selDataBytes_ = 0;
+    std::unique_ptr<Ddc> ddc_;
+
     std::mutex ringMtx_;
     std::vector<float> ring_;
-    size_t ringCap_ = 0;       // complex sample capacity
-    size_t ringWrite_ = 0;     // total complex samples ever pushed
+    size_t ringCap_ = 0;
+    size_t ringWrite_ = 0;
     double bufferSec_ = 0.0;
 };

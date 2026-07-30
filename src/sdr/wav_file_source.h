@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <thread>
 
 class WavFileSource : public SdrSource
@@ -33,6 +34,13 @@ public:
     int    channels() const { return channels_; }
     int    bits() const { return bits_; }
     double progress() const { return progress_.load(); } // 0..1
+    double wavCenterFreq() const { return wavCenterFreq_; }
+
+    // Scrub support
+    void seekToFrame(uint64_t frame);
+    uint64_t currentFrame() const { return currentFrame_.load(); }
+    uint64_t totalFrames() const { return totalFrames_; }
+    void setOnSeek(std::function<void()> fn) { onSeek_ = std::move(fn); }
 
     bool start(int deviceIndex, SdrSampleCb cb, std::string& err) override;
     void stop() override;
@@ -46,14 +54,20 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> loop_{true};
     std::atomic<double> progress_{0.0};
+    std::atomic<uint64_t> currentFrame_{0};
     SdrSampleCb cb_;
+
+    std::atomic<bool> seekPending_{false};
+    std::atomic<uint64_t> seekTarget_{0};
+    std::function<void()> onSeek_;
 
     double centerFreq_ = 750.0e6;
     double sampleRate_ = 2.4e6;
 
-    // Parsed WAV layout.
     int      channels_  = 2;
     int      bits_      = 8;
     uint64_t dataOffset_ = 0;
     uint64_t dataBytes_  = 0;
+    uint64_t totalFrames_ = 0;
+    double   wavCenterFreq_ = 0.0;
 };

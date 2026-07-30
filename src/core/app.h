@@ -127,7 +127,17 @@ struct App
     // IQ recorder
     IqRecorder iqRecorder;
     char iqRecPath[512] = "iq_record.wav";
-    float iqBufferSec = 10.0f;  // IQ pre-buffer seconds (0 = disabled)
+    float iqBufferSec = 10.0f;
+
+    // VFO band selection for IQ slicing
+    bool   vfoShow = false;
+    double vfoLoMHz = 0.0;
+    double vfoHiMHz = 0.0;
+    char   vfoRecPath[512] = "iq_slice.wav";
+
+    // IQ file scrubbing
+    float scrubPos = 0.0f;
+    bool  scrubbing = false;
 
     // Audio output (WFM broadcast listening)
     AudioSink audio;

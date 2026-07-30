@@ -44,6 +44,8 @@ void startActive(App& app)
         iqr->prebuffer(iq, n);
         if (iqr->isRecording())
             iqr->write(iq, n);
+        if (iqr->isRecordingSelection())
+            iqr->writeSelection(iq, n);
     };
     std::string err;
     bool ok = false;
@@ -77,7 +79,21 @@ void startActive(App& app)
         app.wav.setPath(app.wavPath);
         app.wav.setLoop(app.wavLoop);
         app.wav.setCenterFreq(app.centerFreqMHz * 1e6);
+        app.wav.setOnSeek([&app]() {
+            app.viewA.ring.clear();
+            app.viewA.waterfall.clear();
+        });
         ok = app.wav.start(0, cb, err);
+        if (ok)
+        {
+            double wavFc = app.wav.wavCenterFreq();
+            if (wavFc > 0.0)
+            {
+                app.centerFreqMHz = wavFc / 1e6;
+                app.wav.setCenterFreq(wavFc);
+                app.viewA.resetView = true;
+            }
+        }
     }
     else if (app.sourceMode == 2)
     {
@@ -163,6 +179,8 @@ void startActive(App& app)
                 iqr->prebuffer(iq, n);
                 if (iqr->isRecording())
                     iqr->write(iq, n);
+                if (iqr->isRecordingSelection())
+                    iqr->writeSelection(iq, n);
             };
             app.sdrB.setSampleRate(kRates[app.sampleRateIdxB]);
             app.sdrB.setCenterFreq(app.centerFreqMHzB * 1e6);

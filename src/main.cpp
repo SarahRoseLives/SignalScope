@@ -238,6 +238,10 @@ int main(int, char**)
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
+        // F12: take screenshot
+        if (ImGui::IsKeyPressed(ImGuiKey_F12))
+            takeScreenshot();
+
         glfwSwapBuffers(window);
     }
 

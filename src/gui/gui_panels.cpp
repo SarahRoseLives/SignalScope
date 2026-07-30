@@ -14,6 +14,8 @@
 #include "util/log.h"
 #include "version.h"
 #include "gui/waterfall.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../../third_party/stb_image_write.h"
 #include <algorithm>
 #include <cfloat>
 #include <chrono>
@@ -81,6 +83,56 @@ static void beginStartActive(App& app)
     }
 #endif
     startActive(app);
+}
+
+// Bounding rects for Spectrum + Waterfall — populated every frame by drawSpectrum/drawWaterfall,
+// read by takeScreenshot() to capture just the FFT/waterfall region.
+static ImVec2 g_specMin, g_specMax, g_wfMin, g_wfMax;
+
+void takeScreenshot()
+{
+    // Capture only the Spectrum + Waterfall region
+    float x0 = std::min(g_specMin.x, g_wfMin.x);
+    float y0 = std::min(g_specMin.y, g_wfMin.y);
+    float x1 = std::max(g_specMax.x, g_wfMax.x);
+    float y1 = std::max(g_specMax.y, g_wfMax.y);
+    int sw = (int)(x1 - x0), sh = (int)(y1 - y0);
+    if (sw <= 0 || sh <= 0) return;
+
+    // glReadPixels origin is bottom-left; our ImGui coordinates are top-left.
+    GLint vp[4]; glGetIntegerv(GL_VIEWPORT, vp);
+    int glY = vp[3] - (int)y1; // convert to GL Y
+
+    std::vector<unsigned char> pixels(sw * sh * 4);
+    glReadPixels((int)x0, glY, sw, sh, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+    // Flip vertically
+    std::vector<unsigned char> flipped(sw * sh * 4);
+    for (int y = 0; y < sh; y++)
+        memcpy(&flipped[(sh - 1 - y) * sw * 4], &pixels[y * sw * 4], sw * 4);
+
+    // Create screenshots directory if needed
+#if defined(_WIN32)
+    CreateDirectoryA("screenshots", nullptr);
+#else
+    mkdir("screenshots", 0755);
+#endif
+
+    // Generate timestamped filename
+    time_t t = time(nullptr);
+    struct tm tm;
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char filename[256];
+    snprintf(filename, sizeof(filename),
+             "screenshots/screenshot_%04d-%02d-%02d_%02d-%02d-%02d.png",
+             tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+             tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+    stbi_write_png(filename, sw, sh, 4, flipped.data(), sw * 4);
 }
 
 void drawControls(App& app)
@@ -291,9 +343,50 @@ void drawControls(App& app)
 
         if (running)
         {
-            ImGui::ProgressBar((float)app.wav.progress(), ImVec2(-1, 0));
+            float progress = (float)app.wav.progress();
+            uint64_t totalFrames = app.wav.totalFrames();
+            double sr = app.wav.sampleRate();
+
+            if (!app.scrubbing)
+                app.scrubPos = progress;
+
+            double curSec = (double)app.wav.currentFrame() / sr;
+            double totSec = (double)totalFrames / sr;
+            int curM = (int)(curSec / 60.0), curS = (int)curSec % 60;
+            int totM = (int)(totSec / 60.0), totS = (int)totSec % 60;
+            ImGui::Text("%02d:%02d / %02d:%02d", curM, curS, totM, totS);
+            ImGui::SameLine();
+
+            ImGui::SetNextItemWidth(-1.0f);
+            if (ImGui::SliderFloat("##scrub", &app.scrubPos, 0.0f, 1.0f, "",
+                                   ImGuiSliderFlags_AlwaysClamp))
+            {
+                if (!app.scrubbing)
+                    app.scrubbing = true;
+            }
+            if (app.scrubbing && !ImGui::IsItemActive())
+            {
+                uint64_t target = (uint64_t)((double)app.scrubPos * totalFrames);
+                app.wav.seekToFrame(target);
+                app.scrubbing = false;
+            }
+
+            // Jump buttons
+            uint64_t jumpFrames = (uint64_t)(10.0 * sr);
+            if (ImGui::SmallButton("<< 10s"))
+            {
+                uint64_t cur = app.wav.currentFrame();
+                app.wav.seekToFrame(cur > jumpFrames ? cur - jumpFrames : 0);
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("10s >>"))
+            {
+                uint64_t cur = app.wav.currentFrame();
+                app.wav.seekToFrame(std::min(cur + jumpFrames, totalFrames - 1));
+            }
+
             ImGui::Text("WAV: %d ch, %d-bit, %.1f kHz",
-                        app.wav.channels(), app.wav.bits(), app.wav.sampleRate() / 1e3);
+                        app.wav.channels(), app.wav.bits(), sr / 1e3);
         }
     }
     else if (app.sourceMode == 2)
@@ -819,6 +912,48 @@ void drawControls(App& app)
             ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "REC %02d:%02d  —  %s",
                                m, s, app.iqRecorder.path().c_str());
         }
+
+        ImGui::Separator();
+        ImGui::Checkbox("Show VFO on spectrum", &app.vfoShow);
+        if (app.vfoShow)
+        {
+            ImGui::InputDouble("Lo (MHz)", &app.vfoLoMHz, 0.001, 0.01, "%.4f");
+            ImGui::InputDouble("Hi (MHz)", &app.vfoHiMHz, 0.001, 0.01, "%.4f");
+            double bw = app.vfoHiMHz - app.vfoLoMHz;
+            if (bw > 0.0)
+                ImGui::Text("Bandwidth: %.1f kHz", bw * 1000.0);
+        }
+
+        ImGui::SetNextItemWidth(-70.0f);
+        ImGui::InputText("Output file", app.vfoRecPath, sizeof(app.vfoRecPath));
+
+        bool selRec = app.iqRecorder.isRecordingSelection();
+        if (selRec)
+        {
+            if (ImGui::Button("Stop slice##vfo"))
+                app.iqRecorder.stopSelection();
+            double sec = app.iqRecorder.selElapsed();
+            int m = (int)(sec / 60), s = (int)(sec) % 60;
+            double outRate = app.iqRecorder.selSampleRate();
+            ImGui::TextColored(ImVec4(0.3f, 0.8f, 1.0f, 1.0f),
+                               "SLICE %02d:%02d  %.1f ksps",
+                               m, s, outRate / 1000.0);
+        }
+        else
+        {
+            double bwHz = (app.vfoHiMHz - app.vfoLoMHz) * 1e6;
+            bool canSlice = bwHz > 0.0 && app.active->running();
+            ImGui::BeginDisabled(!canSlice);
+            if (ImGui::Button("Record slice##vfo"))
+            {
+                double centerHz = app.active->centerFreq();
+                double sampleRate = app.active->sampleRate();
+                app.iqRecorder.startSelection(app.vfoRecPath, sampleRate,
+                                               centerHz,
+                                               app.vfoLoMHz * 1e6, app.vfoHiMHz * 1e6);
+            }
+            ImGui::EndDisabled();
+        }
     }
 
     if (running)
@@ -845,6 +980,13 @@ void drawSpectrum(App& app, SpectrumView& v, DecoderManager& mgr, const char* ti
                          bool allowBandBrowse, bool voiceView)
 {
     ImGui::Begin(title);
+    // Record position for screenshot
+    {
+        ImVec2 pos = ImGui::GetWindowPos();
+        ImVec2 size = ImGui::GetWindowSize();
+        g_specMin = pos;
+        g_specMax = ImVec2(pos.x + size.x, pos.y + size.y);
+    }
     ImVec2 origin = ImGui::GetCursorScreenPos();
     float availW = ImGui::GetContentRegionAvail().x;
     std::string plotId = std::string("##plot_") + title;
@@ -866,6 +1008,38 @@ void drawSpectrum(App& app, SpectrumView& v, DecoderManager& mgr, const char* ti
         if (v.curN > 0)
         {
             ImPlot::PlotLine("PSD", v.freqMHz.data(), v.avg.data(), v.curN);
+        }
+
+        // VFO band selector
+        if (app.vfoShow && v.curN > 0 && v.freqMHz.front() < v.freqMHz.back())
+        {
+            float bandLo = (float)v.freqMHz.front();
+            float bandHi = (float)v.freqMHz.back();
+            if (app.vfoLoMHz < bandLo || app.vfoHiMHz > bandHi ||
+                app.vfoHiMHz <= app.vfoLoMHz)
+            {
+                app.vfoLoMHz = bandLo + (bandHi - bandLo) * 0.35f;
+                app.vfoHiMHz = bandLo + (bandHi - bandLo) * 0.65f;
+            }
+
+            ImPlot::DragLineX(9001, &app.vfoLoMHz, ImVec4(1.0f, 0.3f, 0.3f, 1.0f), 2.0f);
+            ImPlot::DragLineX(9002, &app.vfoHiMHz, ImVec4(0.3f, 0.6f, 1.0f, 1.0f), 2.0f);
+
+            if (app.vfoLoMHz > app.vfoHiMHz)
+                std::swap(app.vfoLoMHz, app.vfoHiMHz);
+
+            auto* dl = ImPlot::GetPlotDrawList();
+            ImVec2 pp = ImPlot::GetPlotPos();
+            ImVec2 ps = ImPlot::GetPlotSize();
+            ImPlotRect lim = ImPlot::GetPlotLimits();
+            double range = lim.X.Max - lim.X.Min;
+            if (range > 0)
+            {
+                float loPx = pp.x + (float)((app.vfoLoMHz - lim.X.Min) / range) * ps.x;
+                float hiPx = pp.x + (float)((app.vfoHiMHz - lim.X.Min) / range) * ps.x;
+                dl->AddRectFilled(ImVec2(loPx, pp.y), ImVec2(hiPx, pp.y + ps.y),
+                                  IM_COL32(255, 80, 80, 30));
+            }
         }
 
         auto decs = mgr.status();
@@ -1027,6 +1201,13 @@ void drawWaterfall(App& app, SpectrumView& v, const char* title)
 {
     (void)app;
     ImGui::Begin(title);
+    // Record position for screenshot
+    {
+        ImVec2 pos = ImGui::GetWindowPos();
+        ImVec2 size = ImGui::GetWindowSize();
+        g_wfMin = pos;
+        g_wfMax = ImVec2(pos.x + size.x, pos.y + size.y);
+    }
 
     float uMin = 0.0f, uMax = 1.0f;
     float xLo = 0.0f, xHi = 1.0f;
@@ -1610,6 +1791,8 @@ void drawDockHost(App& app)
         {
             if (ImGui::MenuItem(_L("Reset Layout")))
                 forceLayout = true;
+            if (ImGui::MenuItem(_L("Screenshot"), "F12"))
+                takeScreenshot();
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu(_L("Help")))

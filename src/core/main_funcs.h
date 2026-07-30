@@ -29,6 +29,7 @@ void drawMessages(App&);
 void drawEpg(App&);
 void drawHdRadio(App&);
 void drawAbout(App&);
+void takeScreenshot();
 
 // state/config.cpp
 void cfgWriteAll(App&, struct ImGuiTextBuffer*);
