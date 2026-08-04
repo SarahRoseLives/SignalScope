@@ -13,6 +13,7 @@ endif()
 # Dependencies
 # ---------------------------------------------------------------------------
 find_package(OpenGL REQUIRED)
+find_package(Threads REQUIRED)
 find_package(PkgConfig)
 
 find_package(glfw3 CONFIG QUIET)
@@ -180,7 +181,7 @@ endif()
 find_library(ZSTD_LIBRARIES NAMES zstd libzstd REQUIRED)
 find_library(ZLIB_LIB NAMES z libz zlib REQUIRED)
 
-target_link_libraries(SignalScope PRIVATE imgui ${ZLIB_LIB} ${RTLSDR_LIBRARIES} ${HACKRF_LIBRARIES} ${ZSTD_LIBRARIES})
+target_link_libraries(SignalScope PRIVATE imgui ${ZLIB_LIB} ${RTLSDR_LIBRARIES} ${HACKRF_LIBRARIES} ${ZSTD_LIBRARIES} Threads::Threads ${CMAKE_DL_LIBS})
 if(AIRSPY_FOUND)
     target_link_libraries(SignalScope PRIVATE ${AIRSPY_LIBRARIES})
 endif()

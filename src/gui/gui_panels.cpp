@@ -35,6 +35,8 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#else
+#include <sys/stat.h>
 #endif
 
 // Map the "Decode type" combo index (into ChannelRegistry::all()) to a typeId.

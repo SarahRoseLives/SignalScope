@@ -1,4 +1,34 @@
-# Building SignalScope on Windows
+# Building SignalScope
+
+## Linux
+
+### 1. Install dependencies (Debian/Ubuntu)
+
+```bash
+sudo apt install \
+  build-essential cmake ninja-build pkg-config \
+  libglfw3-dev librtlsdr-dev libhackrf-dev libusb-1.0-0-dev \
+  libzstd-dev zlib1g-dev libgl-dev
+```
+
+Optional SDR backends:
+```bash
+sudo apt install libairspy-dev        # Airspy support
+sudo apt install libuhd-dev libboost-dev  # LibreSDR / USRP B210
+sudo apt install fftw3-dev libao-dev     # for libnrsc5 (see optional section below)
+```
+
+### 2. Build
+
+```bash
+cmake -S . -B build -G Ninja
+ninja -C build
+./build/SignalScope
+```
+
+---
+
+## Windows
 
 SignalScope is built with the **MSYS2 / MinGW-w64** toolchain (GCC 15.x) using
 **CMake** and **Ninja**. The build is reproducible from a clean MSYS2 install.
