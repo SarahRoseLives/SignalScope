@@ -99,25 +99,40 @@ bool WavFileSource::start(int, SdrSampleCb cb, std::string& err)
         }
     }
 
-    // If auxi didn't provide center freq, extract from filename (SDR++ convention)
+    // If auxi didn't provide center freq, extract from filename (SDR++ / LibreConsole convention)
     if (wavCenterFreq_ == 0.0)
     {
         std::string name = path_;
         auto pos = name.rfind('\\');
         if (pos == std::string::npos) pos = name.rfind('/');
         if (pos != std::string::npos) name = name.substr(pos + 1);
-        for (size_t i = 0; i + 1 < name.size(); ++i)
+
+        // Try to find a frequency suffix: digits followed by 'M', 'Hz', 'hz', 'HZ', 'k', or 'K'
+        // e.g. "iq_slice_144.390M.wav", "baseband_1575.420M.wav"
+        for (size_t i = 1; i < name.size(); ++i)
         {
-            if (std::tolower((unsigned char)name[i]) != 'h' ||
-                std::tolower((unsigned char)name[i + 1]) != 'z')
-                continue;
+            char c = name[i];
+            bool isSuffix = (c == 'M' || c == 'k' || c == 'K' ||
+                             (c == 'H' && i + 1 < name.size() && name[i + 1] == 'z') ||
+                             (c == 'h' && i + 1 < name.size() && name[i + 1] == 'z'));
+            if (!isSuffix) continue;
+
+            // Scan backwards for digits + decimal point
             size_t j = i;
-            while (j > 0 && name[j - 1] >= '0' && name[j - 1] <= '9')
+            while (j > 0 && ((name[j - 1] >= '0' && name[j - 1] <= '9') ||
+                              name[j - 1] == '.'))
                 --j;
-            std::string digits = name.substr(j, i - j);
-            if (!digits.empty())
+            if (j == i) continue; // no digits found
+
+            std::string num = name.substr(j, i - j);
+            if (!num.empty())
             {
-                wavCenterFreq_ = std::stod(digits);
+                double v = std::stod(num);
+                // 'M' suffix → MHz → Hz
+                if (c == 'M') v *= 1e6;
+                else if (c == 'k' || c == 'K') v *= 1e3;
+                // 'Hz' suffix → already in Hz
+                wavCenterFreq_ = v;
                 break;
             }
         }

@@ -28,6 +28,7 @@ void drawDecoders(App&);
 void drawMessages(App&);
 void drawEpg(App&);
 void drawHdRadio(App&);
+void drawAprs(App&);
 void drawAbout(App&);
 void takeScreenshot();
 

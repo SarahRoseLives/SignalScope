@@ -904,7 +904,12 @@ void drawControls(App& app)
             if (ImGui::Button("Start##iqrec"))
             {
                 if (app.active && app.active->running())
+                {
+                    if (strncmp(app.iqRecPath, "iq_record", 9) == 0)
+                        snprintf(app.iqRecPath, sizeof(app.iqRecPath),
+                                 "iq_record_%.3fM.wav", app.centerFreqMHz);
                     app.iqRecorder.start(app.iqRecPath, app.active->sampleRate());
+                }
             }
         }
         if (app.iqRecorder.isRecording())
@@ -916,7 +921,7 @@ void drawControls(App& app)
         }
 
         ImGui::Separator();
-        ImGui::Checkbox("Show VFO on spectrum", &app.vfoShow);
+        ImGui::Checkbox("Show Slicer on Spectrum", &app.vfoShow);
         if (app.vfoShow)
         {
             ImGui::InputDouble("Lo (MHz)", &app.vfoLoMHz, 0.001, 0.01, "%.4f");
@@ -950,6 +955,12 @@ void drawControls(App& app)
             {
                 double centerHz = app.active->centerFreq();
                 double sampleRate = app.active->sampleRate();
+                if (strncmp(app.vfoRecPath, "iq_slice", 8) == 0)
+                {
+                    double sliceCenter = (app.vfoLoMHz + app.vfoHiMHz) * 0.5;
+                    snprintf(app.vfoRecPath, sizeof(app.vfoRecPath),
+                             "iq_slice_%.3fM.wav", sliceCenter);
+                }
                 app.iqRecorder.startSelection(app.vfoRecPath, sampleRate,
                                                centerHz,
                                                app.vfoLoMHz * 1e6, app.vfoHiMHz * 1e6);
@@ -1716,6 +1727,77 @@ void drawAbout(App& app)
     ImGui::End();
 }
 
+void drawAprs(App& app)
+{
+    ImGui::Begin((std::string(_L("APRS")) + "###APRS").c_str());
+
+    auto msgs = app.decoders.bus().snapshot();
+    if (app.dualMode) {
+        auto b = app.decodersB.bus().snapshot();
+        msgs.insert(msgs.end(), b.begin(), b.end());
+    }
+    std::sort(msgs.begin(), msgs.end(),
+              [](const DecodedRecord& a, const DecodedRecord& b) {
+                  return a.timeSec > b.timeSec;
+              });
+
+    auto count = std::count_if(msgs.begin(), msgs.end(),
+                               [](const DecodedRecord& r) { return r.source == "APRS"; });
+    ImGui::Text("%lld packets", (long long)count);
+    ImGui::SameLine();
+    if (ImGui::SmallButton(_L("Clear"))) {
+        app.decoders.bus().clear();
+        if (app.dualMode) app.decodersB.bus().clear();
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::BeginTable("##aprs", 4,
+                          ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Type",    ImGuiTableColumnFlags_WidthFixed, 70);
+        ImGui::TableSetupColumn("Lat",     ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("Lon",     ImGuiTableColumnFlags_WidthFixed, 80);
+        ImGui::TableSetupColumn("Details");
+        ImGui::TableHeadersRow();
+
+        for (const auto& r : msgs) {
+            if (r.source != "APRS") continue;
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            auto typeIt = r.fields.find("type");
+            ImVec4 tc = ImGui::GetStyle().Colors[ImGuiCol_Text];
+            if (typeIt != r.fields.end()) {
+                const auto& t = typeIt->second;
+                if (t == "Position")      tc = ImVec4(0.3f, 1.0f, 0.3f, 1.0f);
+                else if (t == "Message")  tc = ImVec4(1.0f, 0.7f, 0.2f, 1.0f);
+                else if (t == "Weather")  tc = ImVec4(0.4f, 0.8f, 1.0f, 1.0f);
+                else if (t == "MicE")     tc = ImVec4(1.0f, 0.5f, 0.9f, 1.0f);
+                else if (t == "Telemetry") tc = ImVec4(0.5f, 1.0f, 1.0f, 1.0f);
+                else if (t == "Status")   tc = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+                ImGui::TextColored(tc, "%s", t.c_str());
+            }
+
+            ImGui::TableNextColumn();
+            auto latIt = r.fields.find("lat");
+            if (latIt != r.fields.end())
+                ImGui::TextUnformatted(latIt->second.c_str());
+
+            ImGui::TableNextColumn();
+            auto lonIt = r.fields.find("lon");
+            if (lonIt != r.fields.end())
+                ImGui::TextUnformatted(lonIt->second.c_str());
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(r.text.c_str());
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::End();
+}
+
 // ---------------------------------------------------------------------------
 // Persistent settings: serialized into signalscope.ini alongside the ImGui dock
 // layout via a custom settings handler.
@@ -1784,6 +1866,7 @@ void drawDockHost(App& app)
         ImGui::DockBuilderDockWindow((std::string(_L("Pager")) + "###Messages").c_str(), rbot);
         ImGui::DockBuilderDockWindow((std::string(_L("EPG")) + "###EPG").c_str(), rbot);
         ImGui::DockBuilderDockWindow((std::string(_L("HD Radio")) + "###HDRadio").c_str(), rbot);
+        ImGui::DockBuilderDockWindow((std::string(_L("APRS")) + "###APRS").c_str(), rbot);
         ImGui::DockBuilderFinish(dockId);
     }
 

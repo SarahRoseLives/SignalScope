@@ -139,11 +139,13 @@ add_executable(SignalScope
     src/decode/decoder_manager.cpp
     src/decode/channel/audio_decoder.cpp
     src/decode/channel/pager_decoder.cpp
+    src/decode/channel/aprs_decoder.cpp
     src/decode/channel/oob_decoder.cpp
     src/decode/oob/oob_core.cpp
     src/decode/band_plan.cpp
     src/decode/json_mini.cpp
     src/decode/pocsag_decoder.cpp
+    src/decode/aprs_parser.cpp
     src/util/log.cpp
     src/multimon_ng/multimon_lib.c
     src/multimon_ng/demod_flex.c

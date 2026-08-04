@@ -227,6 +227,7 @@ int main(int, char**)
         drawMessages(app);
         drawEpg(app);
         drawHdRadio(app);
+        drawAprs(app);
         drawAbout(app);
 
         int display_w, display_h;
