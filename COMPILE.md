@@ -26,6 +26,48 @@ ninja -C build
 ./build/SignalScope
 ```
 
+### Optional: SDRplay support (Linux)
+
+SignalScope drives the SDRplay RSP family through **SoapySDR** using the
+**SoapySDRPlay3** module and the SDRplay API 3 service. Two pieces are needed;
+plain `apt install` / `pacman -S` packages do not cover the second one.
+
+1. **SDRplay API 3.15+ and its service.** Download the Linux installer from
+   <https://www.sdrplay.com/api/> (the `libsdrplay` AUR package on Arch works
+   too). Make sure the service is enabled and running:
+
+   ```bash
+   sudo systemctl enable --now sdrplay
+   ```
+
+   The driver (`libsdrplay_api.so`) is not redistributable, so it is not bundled.
+
+2. **The SoapySDRPlay3 module**, which provides SoapySDR's `sdrplay` factory.
+   Most distros do not package it, so build it against the installed SDRplay API
+   headers:
+
+   ```bash
+   git clone --depth 1 https://github.com/pothosware/SoapySDRPlay3.git /tmp/SoapySDRPlay3
+   cmake -S /tmp/SoapySDRPlay3 -B /tmp/SoapySDRPlay3/build -G Ninja
+   ninja -C /tmp/SoapySDRPlay3/build
+   sudo cmake --install /tmp/SoapySDRPlay3/build
+   ```
+
+   This installs `libsdrPlaySupport.so` into
+   `/usr/local/lib/SoapySDR/modules0.8/`, one of SoapySDR's module search paths.
+
+Verify detection before running SignalScope:
+
+```bash
+SoapySDRUtil --info                  # should list: Available factories... sdrplay
+SoapySDRUtil --find="driver=sdrplay" # should print your RSP (serial, label)
+```
+
+CMake reports whether the module was found (`-- SDRplay driver module found: ...`)
+and warns if it is missing. If you installed SoapySDRPlay3 somewhere
+non-standard, point CMake at it with
+`-DSOAPY_SDRPLAY_MODULE=/path/to/libsdrPlaySupport.so`.
+
 ---
 
 ## Windows

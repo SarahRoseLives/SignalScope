@@ -101,6 +101,40 @@ if(ENABLE_SDRPLAY)
     endif()
 endif()
 
+# On Windows the SoapySDRPlay3 module (sdrPlaySupport.dll) ships in the vendored
+# PothosSDR SDK and is copied next to the exe below. On Linux it is a separate
+# package/module installed into SoapySDR's module search path; without it
+# SoapySDR enumerates zero SDRplay devices even though the SDRplay API service
+# is running. Detect it and warn clearly, but never fail the build -- SDRplay is
+# optional and the app degrades gracefully.
+if(SOAPY_FOUND AND NOT WIN32)
+    find_file(SOAPY_SDRPLAY_MODULE
+        NAMES libsdrPlaySupport.so
+        HINTS "${CMAKE_BINARY_DIR}/soapy/lib/SoapySDR/modules0.8"
+        PATHS
+            /usr/lib/SoapySDR/modules0.8
+            /usr/local/lib/SoapySDR/modules0.8
+            /usr/lib64/SoapySDR/modules0.8
+            /usr/local/lib64/SoapySDR/modules0.8)
+    find_library(SDRPLAY_API_LIBRARY NAMES sdrplay_api
+        PATHS /usr/lib /usr/local/lib /usr/lib64 /usr/local/lib64)
+    if(SOAPY_SDRPLAY_MODULE)
+        message(STATUS "SDRplay driver module found: ${SOAPY_SDRPLAY_MODULE}")
+        if(NOT SDRPLAY_API_LIBRARY)
+            message(WARNING
+                "SoapySDRPlay3 is installed but the SDRplay API library "
+                "(libsdrplay_api.so) was not found. Install the SDRplay API 3.15+ "
+                "service (see COMPILE.md) or SDRplay devices will not open.")
+        endif()
+    else()
+        message(WARNING
+            "SoapySDR was found but the SoapySDRPlay3 module (libsdrPlaySupport.so) "
+            "is not installed, so no SDRplay devices will be detected. Build and "
+            "install SoapySDRPlay3 (see COMPILE.md), or pass "
+            "-DSOAPY_SDRPLAY_MODULE=/path/to/libsdrPlaySupport.so.")
+    endif()
+endif()
+
 set(IMGUI_DIR   ${CMAKE_SOURCE_DIR}/third_party/imgui)
 set(IMPLOT_DIR  ${CMAKE_SOURCE_DIR}/third_party/implot)
 
