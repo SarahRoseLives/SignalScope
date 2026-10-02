@@ -6,6 +6,8 @@
 #include "gui/waterfall.h"
 #include "sdr/rtl_sdr_source.h"
 #include "sdr/hackrf_source.h"
+#include "sdr/rtl_tcp_source.h"
+#include "sdr/sdrplay_source.h"
 #ifdef HAS_AIRSPY
 #include "sdr/airspy_source.h"
 #endif
@@ -53,6 +55,8 @@ struct App
     WavFileSource   wav;
     SdrppServerSource server;
     HackRfSource    hack;
+    RtlTcpSource    rtlTcp;
+    SdrplaySource   rsp;
 #ifdef HAS_AIRSPY
     AirspySource    airspy;
 #endif
@@ -60,7 +64,9 @@ struct App
     LibreSdrSource  libre;
 #endif
     SdrSource*      active = &sdr;
-    int  sourceMode = 0; // 0=RTL, 1=WAV, 2=SDR++ Server, 3=HackRF, 4=Dual RTL, 5=Airspy, 6=LibreSDR
+    // 0=RTL, 1=WAV, 2=SDR++ Server, 3=HackRF, 4=Dual RTL, 5=Airspy,
+    // 6=LibreSDR, 7=RTL-TCP, 8=SDRplay
+    int  sourceMode = 0;
     char wavPath[512] = "";
     bool wavLoop = true;
     char serverHost[128] = "localhost";
@@ -68,6 +74,15 @@ struct App
     bool serverCompression = true;
     int  serverSampleType = 1;
     double serverSampleRateMHz = 2.0;
+
+    // RTL-TCP (reuses the RTL sample-rate/gain/PPM/bias settings above)
+    char rtlTcpHost[128] = "127.0.0.1";
+    int  rtlTcpPort = 1234;
+
+    // SDRplay (SoapySDR / SoapySDRPlay3). rspConfig persists the device
+    // selection and hardware settings across restarts.
+    RspConfig rspConfig;
+    std::vector<SdrDeviceInfo> rspDevices;
 
     // HackRF
     double hackSampleRateMHz = 10.0;

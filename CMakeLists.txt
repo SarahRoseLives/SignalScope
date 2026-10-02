@@ -81,6 +81,26 @@ if(UHD_FOUND)
 endif()
 set(LIBRESDR_FOUND ${UHD_FOUND})
 
+# SDRplay (RSP family) via the SoapySDR C API + SoapySDRPlay3 module. The SDK is
+# vendored in third_party/pothos (MSVC-built); MinGW links its C-API import lib
+# directly. A system PothosSDR install is also accepted.
+option(ENABLE_SDRPLAY "Enable SDRplay via the SoapySDR C API" ON)
+set(SOAPY_FOUND FALSE)
+if(ENABLE_SDRPLAY)
+    find_path(SOAPY_INCLUDE_DIR SoapySDR/Device.h
+        HINTS "${CMAKE_SOURCE_DIR}/third_party/pothos/include"
+              "C:/Program Files/PothosSDR/include")
+    find_library(SOAPY_LIBRARY NAMES SoapySDR
+        HINTS "${CMAKE_SOURCE_DIR}/third_party/pothos/lib"
+              "C:/Program Files/PothosSDR/lib")
+    if(SOAPY_INCLUDE_DIR AND SOAPY_LIBRARY)
+        set(SOAPY_FOUND TRUE)
+        message(STATUS "SDRplay enabled via SoapySDR: ${SOAPY_LIBRARY}")
+    else()
+        message(STATUS "SoapySDR not found; SDRplay will show installation instructions")
+    endif()
+endif()
+
 set(IMGUI_DIR   ${CMAKE_SOURCE_DIR}/third_party/imgui)
 set(IMPLOT_DIR  ${CMAKE_SOURCE_DIR}/third_party/implot)
 
@@ -128,6 +148,9 @@ add_executable(SignalScope
     src/state/config.cpp
     src/sdr/rtl_sdr_source.cpp
     src/sdr/hackrf_source.cpp
+    src/sdr/rtl_tcp_source.cpp
+    src/sdr/sdrplay_source.cpp
+    src/gui/sdrplay_controls.cpp
     
     src/sdr/wav_file_source.cpp
     src/sdr/sdrpp_server_source.cpp
@@ -179,6 +202,41 @@ if(LIBRESDR_FOUND)
     target_compile_definitions(SignalScope PRIVATE HAS_LIBRESDR=1)
     target_include_directories(SignalScope PRIVATE ${UHD_INCLUDE_DIRS})
     target_link_directories(SignalScope PRIVATE ${UHD_LIBRARY_DIRS})
+endif()
+if(SOAPY_FOUND)
+    target_compile_definitions(SignalScope PRIVATE HAS_SOAPYSDR=1)
+    # PothosSDR also ships MSVC pthread headers. Exposing its entire include
+    # tree shadows MinGW's pthread.h and breaks std::thread, so copy just the
+    # SoapySDR/ headers into the build dir and include from there.
+    get_filename_component(SOAPY_HEADER_ROOT "${SOAPY_INCLUDE_DIR}/SoapySDR" REALPATH)
+    file(COPY "${SOAPY_HEADER_ROOT}/" DESTINATION "${CMAKE_BINARY_DIR}/soapy-include/SoapySDR")
+    target_include_directories(SignalScope PRIVATE "${CMAKE_BINARY_DIR}/soapy-include")
+    target_link_libraries(SignalScope PRIVATE ${SOAPY_LIBRARY})
+    if(WIN32)
+        get_filename_component(SOAPY_LIB_DIR "${SOAPY_LIBRARY}" DIRECTORY)
+        get_filename_component(SOAPY_ROOT_HINT "${SOAPY_LIB_DIR}/.." ABSOLUTE)
+        target_compile_definitions(SignalScope PRIVATE SOAPY_ROOT_HINT="${SOAPY_ROOT_HINT}")
+        find_file(SOAPY_RUNTIME NAMES SoapySDR.dll libSoapySDR.dll
+            HINTS "${SOAPY_LIB_DIR}/../bin")
+        if(SOAPY_RUNTIME)
+            add_custom_command(TARGET SignalScope POST_BUILD COMMAND ${CMAKE_COMMAND}
+                -E copy_if_different "${SOAPY_RUNTIME}" "$<TARGET_FILE_DIR:SignalScope>")
+        endif()
+        # Bundle the SoapySDRPlay3 module (and MSVC runtime) into <exe>/soapy so
+        # SoapySDR finds the driver via SOAPY_SDR_ROOT without a system install.
+        set(SOAPY_MODULES_DIR "${SOAPY_LIB_DIR}/SoapySDR/modules0.8")
+        if(EXISTS "${SOAPY_MODULES_DIR}")
+            add_custom_command(TARGET SignalScope POST_BUILD COMMAND ${CMAKE_COMMAND}
+                -E copy_directory "${SOAPY_MODULES_DIR}"
+                "$<TARGET_FILE_DIR:SignalScope>/soapy/lib/SoapySDR/modules0.8")
+        endif()
+        set(SOAPY_BIN_DIR "${SOAPY_LIB_DIR}/../bin")
+        if(EXISTS "${SOAPY_BIN_DIR}")
+            add_custom_command(TARGET SignalScope POST_BUILD COMMAND ${CMAKE_COMMAND}
+                -E copy_directory "${SOAPY_BIN_DIR}"
+                "$<TARGET_FILE_DIR:SignalScope>/soapy/bin")
+        endif()
+    endif()
 endif()
 find_library(ZSTD_LIBRARIES NAMES zstd libzstd REQUIRED)
 find_library(ZLIB_LIB NAMES z libz zlib REQUIRED)
@@ -238,8 +296,12 @@ if(WIN32)
             libboost_filesystem-mt.dll
             libboost_serialization-mt.dll
             libboost_thread-mt.dll
-            libpython3.12.dll
         )
+        # UHD links the MSYS2 Python DLL, whose version changes between
+        # releases (3.12, 3.14, ...). Discover it instead of hardcoding.
+        file(GLOB PYTHON_RUNTIME_DLLS RELATIVE "${MINGW_BIN}"
+             "${MINGW_BIN}/libpython3*.dll")
+        list(APPEND FRAMESYNC_RUNTIME_DLLS ${PYTHON_RUNTIME_DLLS})
     endif()
     foreach(dll ${FRAMESYNC_RUNTIME_DLLS})
         if(EXISTS "${MINGW_BIN}/${dll}")

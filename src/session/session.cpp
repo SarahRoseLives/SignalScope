@@ -128,6 +128,28 @@ void startActive(App& app)
         app.hack.setDcBlock(app.dcBlock);
         ok = app.hack.start(app.deviceIndex, cb, err);
     }
+    else if (app.sourceMode == 7)
+    {
+        app.active = &app.rtlTcp;
+        app.rtlTcp.setHost(app.rtlTcpHost);
+        app.rtlTcp.setPort((uint16_t)app.rtlTcpPort);
+        app.rtlTcp.setSampleRate(kRates[app.sampleRateIdx]);
+        app.rtlTcp.setCenterFreq(app.centerFreqMHz * 1e6);
+        app.rtlTcp.setGain(app.autoGain ? -1.0 : (double)app.gainDb);
+        app.rtlTcp.setBiasTee(app.biasTee);
+        app.rtlTcp.setPpm((double)app.ppm);
+        app.rtlTcp.setDcBlock(app.dcBlock);
+        ok = app.rtlTcp.start(0, cb, err);
+    }
+    else if (app.sourceMode == 8)
+    {
+        app.active = &app.rsp;
+        app.rsp.close();
+        app.rsp.setCenterFreq(app.centerFreqMHz * 1e6);
+        ok = app.rsp.prepare(app.rspConfig, err) &&
+             app.rsp.apply(app.rspConfig, err) &&
+             app.rsp.start(0, cb, err);
+    }
 #ifdef HAS_AIRSPY
     else if (app.sourceMode == 5)
     {

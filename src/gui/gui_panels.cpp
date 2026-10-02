@@ -158,6 +158,7 @@ void drawControls(App& app)
 #ifdef HAS_LIBRESDR
             {"LibreSDR", 6},
 #endif
+            {"RTL-TCP", 7}, {"SDRplay", 8},
         };
         const int nOpts = (int)(sizeof(opts) / sizeof(opts[0]));
         const char* cur = "RTL-SDR";
@@ -665,6 +666,62 @@ void drawControls(App& app)
         }
     }
 #endif
+    else if (app.sourceMode == 7)
+    {
+        // ---- RTL-TCP (network RTL-SDR) ----
+        ImGui::BeginDisabled(running);
+        ImGui::SetNextItemWidth(-60.0f);
+        ImGui::InputText("Host", app.rtlTcpHost, sizeof(app.rtlTcpHost));
+        ImGui::InputInt("Port", &app.rtlTcpPort);
+        ImGui::EndDisabled();
+
+        if (ImGui::InputDouble("Center (MHz)", &app.centerFreqMHz, 0.1, 1.0, "%.4f"))
+        {
+            app.viewA.resetView = true;
+            if (running)
+                app.rtlTcp.setCenterFreq(app.centerFreqMHz * 1e6);
+        }
+        if (ImGui::Combo(_L("Sample rate (MHz)"), &app.sampleRateIdx, kRateLabels, kNumRates))
+        {
+            app.viewA.resetView = true;
+            if (running)
+                app.rtlTcp.setSampleRate(kRates[app.sampleRateIdx]);
+        }
+        if (ImGui::Checkbox(_L("Auto gain (AGC)"), &app.autoGain))
+        {
+            if (running)
+                app.rtlTcp.setGain(app.autoGain ? -1.0 : (double)app.gainDb);
+        }
+        if (!app.autoGain)
+        {
+            if (ImGui::SliderFloat("Gain (dB)", &app.gainDb, 0.0f, 50.0f, "%.1f"))
+            {
+                if (running)
+                    app.rtlTcp.setGain((double)app.gainDb);
+            }
+        }
+        if (ImGui::Checkbox(_L("Bias-T"), &app.biasTee))
+        {
+            if (running)
+                app.rtlTcp.setBiasTee(app.biasTee);
+        }
+        if (ImGui::InputFloat("PPM", &app.ppm, 0.1f, 1.0f, "%.2f"))
+        {
+            if (running)
+                app.rtlTcp.setPpm((double)app.ppm);
+        }
+        if (ImGui::Checkbox(_L("DC block"), &app.dcBlock))
+        {
+            if (running)
+                app.rtlTcp.setDcBlock(app.dcBlock);
+        }
+        ImGui::TextDisabled("Tune/gain/rate are sent to the remote rtl_tcp server.");
+    }
+    else if (app.sourceMode == 8)
+    {
+        // ---- SDRplay (SoapySDR / SoapySDRPlay3) ----
+        drawSdrplayControls(app);
+    }
     if (app.sourceMode == 4)
     {
         // ---- Dual RTL: two independent RTL-SDRs ----

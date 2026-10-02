@@ -259,6 +259,8 @@ int main(int, char**)
     app.wav.stop();
     app.server.stop();
     app.hack.stop();
+    app.rtlTcp.stop();
+    app.rsp.close();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

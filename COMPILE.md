@@ -84,6 +84,25 @@ pacman -S --needed mingw-w64-x86_64-libairspy
 Airspy headers are vendored in `third_party/airspy/`. The build automatically
 enables Airspy (`HAS_AIRSPY=1`) when libairspy is found by CMake.
 
+### Optional: SDRplay support
+
+SignalScope drives the SDRplay RSP family through **SoapySDR** using the
+**SoapySDRPlay3** module and the SDRplay API 3 service. A matched SoapySDR SDK
+(headers, import library, `SoapySDR.dll`, and the `sdrPlaySupport` module) is
+vendored in `third_party/pothos/`, so no separate SoapySDR install is required to
+build. CMake enables it automatically (`-- SDRplay enabled via SoapySDR: ...`).
+
+Runtime requirements:
+
+- Install the [SDRplay API and service](https://www.sdrplay.com/api/) (3.15 or
+  newer) from SDRplay. The driver `sdrplay_api.dll` is not redistributable, so it
+  is not bundled.
+- The build copies `SoapySDR.dll` next to the exe and the SoapySDRPlay3 module
+  into `build/soapy/`; the app points `SOAPY_SDR_ROOT` there at runtime, so it
+  works standalone once the SDRplay API service is installed.
+
+RTL-TCP (`rtl_tcp` network source) has no extra dependencies and is always built.
+
 ### Optional: HD Radio (NRSC-5) support
 
 SignalScope uses **libnrsc5** to decode HD Radio digital subcarriers on FM
@@ -192,7 +211,8 @@ build/libgcc_s_seh-1.dll, libwinpthread-1.dll, libstdc++-6.dll,
       libzstd.dll, zlib1.dll, libogg-0.dll, libvorbis-0.dll,
       libvorbisenc-2.dll
 ```
-(plus `build/libairspy.dll` when Airspy support is enabled)
+(plus `build/libairspy.dll` when Airspy support is enabled, and `build/SoapySDR.dll`
+plus a `build/soapy/` driver tree when SDRplay support is enabled)
 
 When LibreSDR support is enabled, the build additionally places next to the exe:
 

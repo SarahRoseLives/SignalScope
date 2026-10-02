@@ -20,6 +20,10 @@ void retuneActive(App& app, double centerMHz)
         app.server.setCenterFreq(hz);
     else if (app.sourceMode == 3)
         app.hack.setCenterFreq(hz);
+    else if (app.sourceMode == 7)
+        app.rtlTcp.setCenterFreq(hz);
+    else if (app.sourceMode == 8)
+        app.rsp.setCenterFreq(hz);
 #ifdef HAS_AIRSPY
     else if (app.sourceMode == 5)
         app.airspy.setCenterFreq(hz);
@@ -54,6 +58,10 @@ void retunePreserving(App& app, double centerMHz)
         app.server.setCenterFreq(hz);
     else if (app.sourceMode == 3)
         app.hack.setCenterFreq(hz);
+    else if (app.sourceMode == 7)
+        app.rtlTcp.setCenterFreq(hz);
+    else if (app.sourceMode == 8)
+        app.rsp.setCenterFreq(hz);
 #ifdef HAS_AIRSPY
     else if (app.sourceMode == 5)
         app.airspy.setCenterFreq(hz);

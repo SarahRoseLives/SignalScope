@@ -21,8 +21,10 @@ A real-time SDR spectrum, waterfall, and multi-decoder console for Windows and l
 | Source            | Notes                                             |
 |-------------------|---------------------------------------------------|
 | RTL-SDR           | Including a dual-RTL mode                          |
+| RTL-TCP           | Remote `rtl_tcp` server (network RTL-SDR)          |
 | HackRF            |                                                   |
 | Airspy R2 / Mini  | Optional (enabled when libairspy is found)        |
+| SDRplay RSP family | Via SoapySDR + SoapySDRPlay3 (optional; RSP1/1A/1B, RSP2, RSPduo, RSPdx) |
 | LibreSDR / USRP B210 | Via UHD; loads a custom FPGA bitstream. RXA/RXB/TRXA/TRXB port selection |
 | SDR++ server      | Network source                                    |
 | WAV / IQ file     | Playback of recorded captures                     |
